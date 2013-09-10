@@ -89,6 +89,12 @@
 #include "filename_tools.h"
 #include "ipv6_hostname.h"
 #include "globus_utils.h"
+
+
+#include "classad/literals.h"
+#include "classad/value.h"
+#include "classad/exprTree.h"
+
 #if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN)
 #include "ScheddPlugin.h"
@@ -10944,6 +10950,19 @@ Scheduler::Init()
     m_adSchedd = new ClassAd(*m_adBase);
 	SetMyTypeName(*m_adSchedd, SCHEDD_ADTYPE);
 	m_adSchedd->Assign(ATTR_NAME, Name);
+	
+	//
+	tmp = param( "TRANSFER_QUEUE_USER_EXPR" );
+	dprintf(D_FULLDEBUG, "TransferQueueUserExpr: =%s\n", tmp);
+	classad::Value val;
+	val.SetStringValue(tmp);
+	classad::ExprTree *lit = classad::Literal::MakeLiteral(val);
+	m_adSchedd->Insert(ATTR_TRANSFER_QUEUE_USER_EXPR, lit);
+	
+	
+	
+	free(tmp);
+	tmp = NULL;
 
 	// This is foul, but a SCHEDD_ADTYPE _MUST_ have a NUM_USERS attribute
 	// (see condor_classad/classad.C
