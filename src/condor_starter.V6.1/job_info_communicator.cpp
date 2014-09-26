@@ -39,7 +39,6 @@ extern CStarter *Starter;
 JobInfoCommunicator::JobInfoCommunicator()
 {
 	job_ad = NULL;
-	mach_ad = NULL;
 	job_universe = CONDOR_UNIVERSE_VANILLA;
 	job_cluster = -1;
 	job_proc = -1;
@@ -75,9 +74,6 @@ JobInfoCommunicator::~JobInfoCommunicator()
 {
 	if( job_ad ) {
 		delete job_ad;
-	}
-	if( mach_ad ) {
-		delete mach_ad;
 	}
 	if( u_log ) {
 		delete u_log;
@@ -230,9 +226,14 @@ JobInfoCommunicator::jobClassAd( void )
 ClassAd*
 JobInfoCommunicator::machClassAd( void )
 {
-	return mach_ad;
+	return mach_ad_ptr.get();
 }
 
+classad_shared_ptr<ClassAd>
+JobInfoCommunicator::machClassAdSharedPtr( void )
+{
+	return mach_ad_ptr;
+}
 
 int
 JobInfoCommunicator::jobUniverse( void )
@@ -821,17 +822,38 @@ JobInfoCommunicator::setupJobEnvironment( void )
 		int rval = m_hook_mgr->tryHookPrepareJob();
 		switch (rval) {
 		case -1:   // Error
+			dprintf(D_ALWAYS, "tryHookPrepareJob failed\n");
 			Starter->RemoteShutdownFast(0);
 			return;
 			break;
 
 		case 0:    // Hook not configured
-				// Nothing to do, break out and finish.
+				// Call tryHookPrepareMachine here
+		{
+            std::string stage("execution");
+            m_hook_mgr->setHookPrepareMachineStage(stage);
+			int rval1 = m_hook_mgr->tryHookPrepareMachine();
+			if(rval1 == -1) { // Error
+				Starter->RemoteShutdownFast(0);
+				return;
+			}
+			if(rval1 == 0) { // Hook not configured
+				dprintf(D_ALWAYS, "tryHookPrepareMachine is not configured\n");
+				// Do nothing here, just break and call
+				// jobEnvironmentReady
+                break;
+			}
+			if(rval1 == 1) {
+				dprintf(D_ALWAYS, "tryHookPrepareMachine has been spawned.\n");
+				return;
+			}
+		}	
 			break;
 
 		case 1:    // Spawned the hook.
 				// We need to bail now, and let the handler call
 				// jobEnvironmentReady() when the hook returns.
+			dprintf(D_ALWAYS, "tryHookPrepareJob has been spawned\n");
 			return;
 			break;
 		}
@@ -844,6 +866,11 @@ JobInfoCommunicator::setupJobEnvironment( void )
 	Starter->jobEnvironmentReady();
 }
 
+void
+JobInfoCommunicator::performFileTransfer( void )
+{
+    
+}
 
 void
 JobInfoCommunicator::cancelUpdateTimer( void )

@@ -43,6 +43,8 @@
 #include "subsystem_info.h"
 #include "condor_url.h"
 #include "my_popen.h"
+#include "NetworkPluginManager.h"
+
 #include <list>
 
 const char * const StdoutRemapName = "_condor_stdout";
@@ -70,6 +72,23 @@ bool FileTransfer::ServerShouldBlock = true;
 
 const int FINAL_UPDATE_XFER_PIPE_CMD = 1;
 const int IN_PROGRESS_UPDATE_XFER_PIPE_CMD = 0;
+
+#ifdef WIN32
+        #define __ATTRIBUTE__WEAK__
+        #define SHUT_RDWR 2
+#else
+        #define __ATTRIBUTE__WEAK__ __attribute__ ((weak))
+#endif
+
+// Only in the starter executable is this a strong symbol
+// This allows the file transfer object to get the starter classad for
+// the network plugin - but only the starter!
+bool
+__ATTRIBUTE__WEAK__
+GetMachineInfo(classad_shared_ptr<classad::ClassAd> &, std::string &)
+{
+	return false;
+}
 
 class FileTransferItem {
 public:
@@ -831,6 +850,46 @@ FileTransfer::Init( ClassAd *Ad, bool want_check_perms, priv_state priv,
 }
 
 int
+FileTransfer::DownloadConnect(ReliSock &sock)
+{
+	dprintf(D_FULLDEBUG, "Connecting new socket to server.\n");
+	sock.timeout(clientSockTimeout);
+
+	Daemon d( DT_ANY, TransSock );
+
+	if ( !d.connectSock(&sock,0) ) {
+		dprintf( D_ALWAYS, "FileTransfer: Unable to connect to server "
+		"%s\n", TransSock );
+		Info.success = 0;
+		Info.in_progress = false;
+		formatstr( Info.error_desc, "FileTransfer: Unable to connecto to server %s",
+			TransSock );
+		return 0;
+	}
+
+	CondorError err_stack;
+	if ( !d.startCommand(FILETRANS_UPLOAD, &sock, 0, &err_stack, NULL, false, m_sec_session_id) ) {
+		Info.success = 0;
+		Info.in_progress = 0;
+		formatstr( Info.error_desc, "FileTransfer: Unable to start "
+			"transfer with server %s: %s", TransSock,
+			err_stack.getFullText().c_str() );
+	}
+
+	sock.encode();
+
+	if ( !sock.put_secret(TransKey) ||
+			!sock.end_of_message() ) {
+		Info.success = 0;
+		Info.in_progress = false;
+		formatstr( Info.error_desc, "FileTransfer: Unable to start transfer with server %s",
+			TransSock );
+		return 0;
+	}
+	return 1;
+}
+
+int
 FileTransfer::DownloadFiles(bool blocking)
 {
 	int ret_value;
@@ -855,38 +914,13 @@ FileTransfer::DownloadFiles(bool blocking)
 			EXCEPT("FileTransfer: DownloadFiles called on server side");
 		}
 
-		sock.timeout(clientSockTimeout);
-
-		Daemon d( DT_ANY, TransSock );
-
-		if ( !d.connectSock(&sock,0) ) {
-			dprintf( D_ALWAYS, "FileTransfer: Unable to connect to server "
-					 "%s\n", TransSock );
-			Info.success = 0;
-			Info.in_progress = false;
-			formatstr( Info.error_desc, "FileTransfer: Unable to connecto to server %s",
-					 TransSock );
-			return FALSE;
-		}
-
-		CondorError err_stack;
-		if ( !d.startCommand(FILETRANS_UPLOAD, &sock, 0, &err_stack, NULL, false, m_sec_session_id) ) {
-			Info.success = 0;
-			Info.in_progress = 0;
-			formatstr( Info.error_desc, "FileTransfer: Unable to start "
-					   "transfer with server %s: %s", TransSock,
-					   err_stack.getFullText().c_str() );
-		}
-
-		sock.encode();
-
-		if ( !sock.put_secret(TransKey) ||
-			!sock.end_of_message() ) {
-			Info.success = 0;
-			Info.in_progress = false;
-			formatstr( Info.error_desc, "FileTransfer: Unable to start transfer with server %s",
-					 TransSock );
-			return 0;
+		if ((!NetworkPluginManager::HasPlugins() || blocking))
+		{
+			if (!DownloadConnect(sock))
+			{
+				dprintf(D_ALWAYS, "Failed to connect socket to server.\n");
+				return false;
+			}
 		}
 
 		sock_to_use = &sock;
@@ -1374,6 +1408,14 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 	transobject->ActiveTransferTid = -1;
 	TransThreadTable->remove(pid);
 
+	if (param_boolean("ENABLE_NETWORK_NAMESPACE_FOR_FILETRANSFER", true) && NetworkPluginManager::HasPlugins() && transobject->m_network_name.size())
+	{
+        const std::string job_phase = "stage_in";
+		NetworkPluginManager::PerformJobAccounting(NULL, job_phase);
+		int rc = NetworkPluginManager::Cleanup(transobject->m_network_name);
+		if (rc) dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+	}
+
 	transobject->Info.duration = time(NULL)-transobject->TransferStart;
 	transobject->Info.in_progress = false;
 	if( WIFSIGNALED(exit_status) ) {
@@ -1613,7 +1655,7 @@ FileTransfer::TransferPipeHandler(int p)
 }
 
 int
-FileTransfer::Download(ReliSock *s, bool blocking)
+FileTransfer::Download(ReliSock *sock, bool blocking)
 {
 	dprintf(D_FULLDEBUG,"entering FileTransfer::Download\n");
 	
@@ -1630,7 +1672,7 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 
 	if (blocking) {
 
-		int status = DoDownload( &Info.bytes, (ReliSock *) s );
+		int status = DoDownload( &Info.bytes, (ReliSock *) sock );
 		Info.duration = time(NULL)-TransferStart;
 		Info.success = ( status >= 0 );
 		Info.in_progress = false;
@@ -1662,9 +1704,30 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 		download_info *info = (download_info *)malloc(sizeof(download_info));
 		ASSERT ( info );
 		info->myobj = this;
+
+		classad_shared_ptr<classad::ClassAd> machineAdPtr;
+		if (param_boolean("ENABLE_NETWORK_NAMESPACE_FOR_FILETRANSFER", true) && param_boolean("USE_NETWORK_NAMESPACES", false) && GetJobAd() && GetMachineInfo(machineAdPtr, m_network_name))
+		{
+			ClassAd fakeMachineAd;
+			int rc = NetworkPluginManager::PrepareNetwork(m_network_name, *GetJobAd(), machineAdPtr);
+			if (rc) {
+				dprintf(D_ALWAYS, "Failed to prepare network namespace - bailing.\n");
+				rc = NetworkPluginManager::Cleanup(m_network_name);
+				if (rc) dprintf(D_ALWAYS, "Failed to cleanup unprepared network namespace (rc=%d)\n", rc);
+				return false;
+			}
+		}
+
+		if (NetworkPluginManager::PreFork())
+		{
+			dprintf(D_ALWAYS, "Preparation for fork failed in the network manager.\n");
+			return false;
+		}
+
 		ActiveTransferTid = daemonCore->
 			Create_Thread((ThreadStartFunc)&FileTransfer::DownloadThread,
-						  (void *)info, s, ReaperId);
+						  (void *)info, sock, ReaperId);
+
 		if (ActiveTransferTid == FALSE) {
 			dprintf(D_ALWAYS,
 					"Failed to create FileTransfer DownloadThread!\n");
@@ -1672,6 +1735,20 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 			free(info);
 			return FALSE;
 		}
+
+		if (param_boolean("ENABLE_NETWORK_NAMESPACE_FOR_FILETRANSFER", true) && NetworkPluginManager::HasPlugins())
+		{
+			if (NetworkPluginManager::PostForkParent(ActiveTransferTid))
+			{
+				kill(ActiveTransferTid, SIGKILL);
+				dprintf(D_ALWAYS, "Failed to alter the child (%d) network namespace in post-fork of parent.\n", ActiveTransferTid);
+			}
+			else
+			{
+				dprintf(D_FULLDEBUG, "Post-fork network namespace operation in parent successful.\n");
+			}
+		}
+
 		dprintf(D_FULLDEBUG,
 				"FileTransfer: created download transfer process with id %d\n",
 				ActiveTransferTid);
@@ -1684,13 +1761,28 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 }
 
 int
-FileTransfer::DownloadThread(void *arg, Stream *s)
+FileTransfer::DownloadThread(void *arg, Stream *sock)
 {
 	filesize_t	total_bytes;
 
 	dprintf(D_FULLDEBUG,"entering FileTransfer::DownloadThread\n");
+
+	int net_rc;
+	if (param_boolean("ENABLE_NETWORK_NAMESPACE_FOR_FILETRANSFER", true) && NetworkPluginManager::HasPlugins())
+	{
+		if ((net_rc = NetworkPluginManager::PostForkChild()))
+		{
+			dprintf(D_ALWAYS,"Failed to finish creating network namespace in child (rc=%d)\n", net_rc);
+			return false;
+		}
+		else
+		{
+			dprintf(D_FULLDEBUG, "Download thread believes network namespace is completely configured.\n");
+		}
+	}
+
 	FileTransfer * myobj = ((download_info *)arg)->myobj;
-	int status = myobj->DoDownload( &total_bytes, (ReliSock *)s );
+	int status = myobj->DoDownload( &total_bytes, (ReliSock *)sock );
 
 	if(!myobj->WriteStatusToTransferPipe(total_bytes)) {
 		return 0;
@@ -1754,6 +1846,12 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 
 	priv_state saved_priv = PRIV_UNKNOWN;
 	*total_bytes = 0;
+
+	if (!s->is_connected() && !DownloadConnect(*s))
+	{
+		dprintf(D_ALWAYS, "Failed to connect socket to remote server.\n");
+		return_and_resetpriv( -1 );
+	}
 
 	downloadStartTime = time(NULL);
 

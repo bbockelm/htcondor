@@ -314,6 +314,11 @@ class FileTransfer: public Service {
 
   protected:
 
+		/** 
+		 * Connect the given socket object to the relevant server.
+		 */
+	int DownloadConnect(ReliSock &sock);
+
 	int Download(ReliSock *s, bool blocking);
 	int Upload(ReliSock *s, bool blocking);
 	static int DownloadThread(void *arg, Stream *s);
@@ -356,6 +361,7 @@ class FileTransfer: public Service {
 	StringList* FilesToSend;
 	StringList* EncryptFiles;
 	StringList* DontEncryptFiles;
+	std::string m_network_name;
 	char* OutputDestination;
 	char* SpooledIntermediateFiles;
 	char* ExecFile;
