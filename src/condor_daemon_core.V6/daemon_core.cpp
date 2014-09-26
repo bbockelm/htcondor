@@ -104,6 +104,8 @@ CRITICAL_SECTION Big_fat_mutex; // coarse grained mutex for debugging purposes
 #include "authentication.h"
 #include "condor_claimid_parser.h"
 #include "condor_email.h"
+#include "NetworkPluginManager.h"
+
 #include "valgrind.h"
 #include "ipv6_hostname.h"
 #include "daemon_command.h"
@@ -5646,6 +5648,7 @@ pid_t CreateProcessForkit::fork_exec() {
 			(CLONE_VM|CLONE_VFORK|SIGCHLD),
 			this );
 
+			// Note that the network manager isn't attempted here.
 		exitCreateProcessChild();
 
 			// Since we used the CLONE_VFORK flag, the child has exited
@@ -5658,15 +5661,31 @@ pid_t CreateProcessForkit::fork_exec() {
 	}
 #endif /* HAVE_CLONE */
 
+        // The network manager has special synchronization, regardless of clone or fork.
+	if (NetworkPluginManager::PreFork()) {
+		dprintf(D_ALWAYS, "Preparation for clone failed in the network manager.\n");
+		return -1;
+	}
+
 	int fork_flags = 0;
 	if (m_family_info) {
 		fork_flags |= m_family_info->want_pid_namespace ? CLONE_NEWPID : 0;
 	}
 	newpid = this->fork(fork_flags);
+
 	if( newpid == 0 ) {
 			// in child
 		enterCreateProcessChild(this);
 		exec(); // never returns
+	}
+
+	if (NetworkPluginManager::HasPlugins()) {
+		if ((NetworkPluginManager::PostForkParent(newpid))) {
+			kill(newpid, SIGKILL);
+			dprintf(D_ALWAYS, "Failed to alter the child (%d) network namespace in post-clone of parent.\n", newpid);
+		} else {
+			dprintf(D_FULLDEBUG, "Post-clone network namespace operation in parent successful.\n");
+		}
 	}
 
 	return newpid;
@@ -6024,6 +6043,20 @@ void CreateProcessForkit::exec() {
 			}
 		}
 	}
+
+	if (NetworkPluginManager::HasPlugins()) {
+		int net_rc;
+		// Note we call PostCloneChild *regardless* of whether we can actually set the root privs.
+		// This is because PostForkChild contains necessary synchronization primitives.
+		if ((net_rc = NetworkPluginManager::PostForkChild())) {
+			dprintf(D_ALWAYS, "Failed to finish creating network namespace in child (rc=%d)\n", net_rc);
+			writeExecError(net_rc);
+			_exit(4);
+		} else {
+			dprintf(D_FULLDEBUG, "Child believes network namespace is completely configured.\n");
+		}
+	}
+
 
 		// This _must_ be called before calling exec().
 	writeTrackingGid(tracking_gid);
@@ -6488,6 +6521,9 @@ int DaemonCore::Create_Process(
 	}
 	if ( (reaper_id < 0) || (reaper_id >= nextReapId) ) {
 		dprintf(D_ALWAYS,"Create_Process: invalid reaper_id\n");
+		// Debug for lark_network_policy, need to be deleted after working
+		dprintf(D_ALWAYS, "maxReap is %d\n", maxReap);
+		dprintf(D_ALWAYS, "readper_id is %d, and the corresponding id in the reapTable is %d\n", reaper_id, reapTable[reaper_id - 1].num);
 		goto wrapup;
 	}
 

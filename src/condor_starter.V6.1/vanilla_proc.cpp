@@ -36,6 +36,9 @@
 #include "env.h"
 #include "subsystem_info.h"
 #include "cgroup_limits.h"
+#include "NetworkPluginManager.h"
+
+#include <sstream>
 
 #ifdef WIN32
 #include "executable_scripts.WINDOWS.h"
@@ -134,7 +137,34 @@ void StarterStatistics::Publish(ClassAd& ad, int flags) const {
 }
 
 
+bool
+GetMachineInfo(classad_shared_ptr<classad::ClassAd> &machineAd, std::string &network_name)
+{
+	std::string tmp_network_name;
+	std::string starter_name;
+	if (!Starter->jic->machClassAd()->EvalString(ATTR_NAME, NULL, starter_name))
+	{
+		dprintf(D_ALWAYS, "'Name' attribute not in machine classad.\n");
+		return false;
+	}
+	size_t at_pos = starter_name.find("@");
+	if (at_pos == std::string::npos) {
+		tmp_network_name = starter_name;
+	} else {
+		tmp_network_name = starter_name.substr(0, at_pos);
+	}
+	if (tmp_network_name.size() == 0) {
+		dprintf(D_ALWAYS, "Unable to determine starter slot name.\n");
+		return false;
+	}
+	machineAd = Starter->jic->machClassAdSharedPtr();
+	network_name = tmp_network_name;
+
+	return true;
+}
+
 VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd),
+	m_network_name(),
 	m_memory_limit(-1),
 	m_oom_fd(-1),
 	m_oom_efd(-1)
@@ -504,6 +534,23 @@ VanillaProc::StartJob()
 		} else {
 			dprintf(D_ALWAYS, "Unable to perform mappings because %s doesn't exist.\n", working_dir.c_str());
 			return FALSE;
+ 		}
+	}
+
+	if (param_boolean("USE_NETWORK_NAMESPACES", false) && JobAd) {
+		dprintf(D_FULLDEBUG, "We will prepare a network namespace.\n");
+		classad_shared_ptr<classad::ClassAd> machine_classad;
+		if (!GetMachineInfo(machine_classad, m_network_name))
+		{
+			return false;
+		}
+		dprintf(D_FULLDEBUG, "Using network namespaces with network name '%s'.\n", m_network_name.c_str());
+		int rc = NetworkPluginManager::PrepareNetwork(m_network_name, *JobAd, machine_classad);
+		if (rc) {
+			dprintf(D_ALWAYS, "Failed to prepare network namespace - bailing.\n");
+			rc = NetworkPluginManager::Cleanup(m_network_name);
+                	if (rc) dprintf(D_ALWAYS, "Failed to cleanup unprepared network namespace (rc=%d)\n", rc);
+			return FALSE;
 		}
 	}
 
@@ -639,6 +686,10 @@ VanillaProc::StartJob()
 	}
 
 #endif
+	if (!retval) {
+		int rc = NetworkPluginManager::Cleanup(m_network_name);
+		if (rc) dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+	}
 
 	return retval;
 }
@@ -696,6 +747,8 @@ VanillaProc::PublishUpdateAd( ClassAd* ad )
 
 		// Update our knowledge of how many processes the job has
 	num_pids = usage->num_procs;
+    const std::string jobphase = "execution";
+	NetworkPluginManager::PerformJobAccounting(ad, jobphase);
 
         // publish standardized "generic_stats" statistics
     m_statistics.Publish(*ad);
@@ -739,6 +792,18 @@ VanillaProc::JobReaper(int pid, int status)
 		if (daemonCore->Get_Family_Usage(JobPid, m_final_usage) == FALSE) {
 			dprintf(D_ALWAYS, "error getting family usage for pid %d in "
 					"VanillaProc::JobReaper()\n", JobPid);
+		}
+		if (m_network_name.length() && NetworkPluginManager::HasPlugins()) {
+			// Call this before removing the statistics; PublishUpdateAd is called after JobReaper
+            const std::string jobphase = "execution";
+			NetworkPluginManager::PerformJobAccounting(NULL, jobphase);
+			// TODO: cleanup correct namespace
+			int rc = NetworkPluginManager::Cleanup(m_network_name);
+			if (rc) {
+				dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+			} else {
+				dprintf(D_FULLDEBUG, "Cleaned up network namespace %s.\n", m_network_name.c_str());
+			}
 		}
 	}
 
