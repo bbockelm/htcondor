@@ -2625,6 +2625,8 @@ SecMan::sec_char_to_auth_method( char* method ) {
 		return CAUTH_NTSSPI;
 	} else if ( !strcasecmp( method, "PASSWORD" ) ) {
 		return CAUTH_PASSWORD;
+	} else if ( !strcasecmp( method, "PASSWORD2" ) ) {
+		return CAUTH_PASSWORD2;
 	} else if ( !strcasecmp( method, "FS" ) ) {
 		return CAUTH_FILESYSTEM;
 	} else if ( !strcasecmp( method, "FS_REMOTE" ) ) {
