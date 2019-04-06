@@ -94,7 +94,7 @@ class Condor_Auth_SSL : public Condor_Auth_Base {
 
  private:
 
-	enum CondorAuthSSLRetval {
+	enum class CondorAuthSSLRetval {
 		Fail = 0,
 		Success,
 		WouldBlock
