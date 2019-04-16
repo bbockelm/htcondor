@@ -79,6 +79,7 @@ DaemonList::shouldTryTokenRequest()
 	while( list.Next(daemon) ) {
 		try_token_request |= daemon->shouldTryTokenRequest();
 	}
+	return try_token_request;
 }
 
 

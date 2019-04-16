@@ -1081,6 +1081,8 @@ private:
 	std::string m_token_request_id;
 	std::string m_token_client_id;
 	Daemon *m_token_daemon;
+	bool m_initial_update{true}; // First update to the collector after reconfig blocks so we can trigger
+					// token auth if needed
 
 	friend class DedicatedScheduler;
 };

@@ -1471,10 +1471,11 @@ Scheduler::count_jobs()
 #endif
 
 		// Update collectors
-	int num_updates = daemonCore->sendUpdates(UPDATE_SCHEDD_AD, cad, NULL, true);
+	int num_updates = daemonCore->sendUpdates(UPDATE_SCHEDD_AD, cad, NULL, !m_initial_update);
 	dprintf( D_FULLDEBUG, 
 			 "Sent HEART BEAT ad to %d collectors. Number of active submittors=%d\n",
 			 num_updates, NumSubmitters );
+	m_initial_update = false;
 
 		// Check to see if we need to perform a token request.
 	auto collector_list = daemonCore->getCollectorList();
@@ -1482,6 +1483,8 @@ Scheduler::count_jobs()
 		dprintf(D_FULLDEBUG|D_SECURITY, "Authentication failed; schedd should perform a token request\n");
 		daemonCore->Register_Timer(0, (TimerHandlercpp)&Scheduler::try_token_request,
 			"Scheduler::try_token_request", this);
+	} else if (num_updates == 0) {
+		dprintf(D_FULLDEBUG|D_SECURITY, "Authentication failed but no token request will be tried.\n");
 	}
 
 	// send the schedd ad to our flock collectors too, so we will
@@ -13784,6 +13787,7 @@ Scheduler::Register()
 	m_token_request_id = "";
 		// We don't own this memory - just clear the reference.
 	m_token_daemon = nullptr; 
+	m_initial_update = true;
 }
 
 void
@@ -17386,6 +17390,7 @@ int Scheduler::reassign_slot_handler( int cmd, Stream * s ) {
 void
 Scheduler::try_token_request()
 {
+	dprintf(D_SECURITY, "Trying token request to remote host.\n");
 	std::string token;
 	if (m_token_client_id.empty()) {
 		m_token_daemon = nullptr;
@@ -17405,12 +17410,12 @@ Scheduler::try_token_request()
 			m_token_client_id = "";
 			return;
 		}
-		Daemon *daemon;
+		Daemon *daemon = nullptr;
 		collector_list->Current(daemon);
-		while (daemon && !daemon->shouldTryTokenRequest()) {
-			collector_list->Next(daemon);
-		}
-		if (!daemon || !daemon->shouldTryTokenRequest()) {
+		//while (daemon && !daemon->shouldTryTokenRequest() && collector_list->Next(daemon)) {}
+
+		//if (!daemon || !daemon->shouldTryTokenRequest()) {
+		if (!daemon) {
 			dprintf(D_ALWAYS, "Unable to start token request because collector not found.\n");
 			m_token_client_id = "";
 			return;
