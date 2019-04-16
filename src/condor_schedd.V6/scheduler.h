@@ -1076,6 +1076,12 @@ private:
 
 	bool m_matchPasswordEnabled;
 
+	// State for token request.
+	void try_token_request();
+	std::string m_token_request_id;
+	std::string m_token_client_id;
+	Daemon *m_token_daemon;
+
 	friend class DedicatedScheduler;
 };
 

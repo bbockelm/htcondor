@@ -70,6 +70,18 @@ DaemonList::init( daemon_t type, const char* host_list, const char* pool_list )
 }
 
 
+bool
+DaemonList::shouldTryTokenRequest()
+{
+	list.Rewind();
+	Daemon *daemon = nullptr;
+	bool try_token_request = false;
+	while( list.Next(daemon) ) {
+		try_token_request |= daemon->shouldTryTokenRequest();
+	}
+}
+
+
 Daemon*
 DaemonList::buildDaemon( daemon_t type, const char* host, char const *pool )
 {
