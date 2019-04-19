@@ -62,6 +62,10 @@ set_source_files_properties(../condor_sysapi/clinpack.cpp PROPERTIES COMPILE_FLA
 set_source_files_properties(../condor_daemon_core.V6/self_monitor.cpp ../classad_analysis/analysis.cpp ../classad_analysis/interval.cpp generic_stats.cpp generic_query.cpp PROPERTIES COMPILE_FLAGS -Wno-float-equal)
 endif(UNIX)
 
+if (SCITOKENS_FOUND)
+include_directories(${SCITOKENS_INCLUDE_DIRS})
+endif(SCITOKENS_FOUND)
+
 # Turn off the OpenSSL deprecation warnings until we decide on the long-term direction with OpenSSL on Mac.
 if (DARWIN)
 	set_source_files_properties(condor_base64.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
