@@ -122,6 +122,7 @@ endif ( WINDOWS )
 # src - src -> only
 # this way clean @ root cleans externals while clean @src cleans just the src.
 add_subdirectory (src)
+add_subdirectory (docs)
 add_subdirectory (build/packaging)
 
 ##########################################################################
