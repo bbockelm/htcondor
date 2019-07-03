@@ -22,6 +22,10 @@
 #include "killfamily.h"
 #include "../condor_procapi/procapi.h"
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 KillFamily::KillFamily( pid_t pid, priv_state priv, int test_only )
 {
 	daddy_pid = pid;

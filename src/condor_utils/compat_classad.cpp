@@ -34,6 +34,10 @@
 #include <sstream>
 #include <unordered_set>
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
+
 class MapFile;
 extern int reconfig_user_maps();
 extern bool user_map_do_mapping(const char * mapname, const char * input, MyString & output);

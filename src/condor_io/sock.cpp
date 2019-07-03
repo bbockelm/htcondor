@@ -45,7 +45,12 @@
 // <winsock2.h> already included...
 // note: IPPROTO_IPV6 is an enum member, not a #define on WIN32
 #else
+#include <signal.h>
+#include <netdb.h>
+#include <sys/ioctl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
 #endif
 
 #ifdef HAVE_EXT_OPENSSL

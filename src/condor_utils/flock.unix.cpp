@@ -23,6 +23,8 @@
 #include "condor_common.h"
 #include "condor_debug.h"
 
+#include <fcntl.h>
+
 /*
 ** Compatibility routine for systems which utilize various forms of the
 ** fcntl() call for this purpose.  Note that semantics are a bit different

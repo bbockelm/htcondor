@@ -22,6 +22,8 @@
 #include "condor_debug.h"
 #include "condor_pidenvid.h"
 
+#include <string.h>
+
 DLL_IMPORT_MAGIC extern char **environ;
 
 /* set the structure to default values */

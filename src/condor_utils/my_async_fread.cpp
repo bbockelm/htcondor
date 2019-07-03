@@ -23,6 +23,7 @@
 #include "condor_debug.h"
 
 #include "my_async_fread.h"
+#include <fcntl.h>
 
 #define ALIGN_SIZE(len,align) ((len) + (align-1)) & ~(align-1);
 

@@ -29,6 +29,7 @@
 #include "condor_ver_info.h"
 #include "matchmaker_negotiate.h"
 
+#include <cfloat>
 #include <vector>
 #include <string>
 #include <map>

@@ -5,6 +5,11 @@
 #include "ipv6_interface.h"
 #include "condor_debug.h"
 
+#ifndef WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#endif
+
 typedef union sockaddr_storage_ptr_u {
         const struct sockaddr     *raw;
         struct sockaddr_in  *in;

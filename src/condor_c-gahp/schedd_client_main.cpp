@@ -30,6 +30,10 @@
 #include "io_loop.h"
 #include "PipeBuffer.h"
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 char * myUserName = NULL;
 
 extern char * ScheddAddr;

@@ -21,6 +21,7 @@
 #include "condor_common.h"
 #include "condor_getmnt.h"
 
+#include <cstring>
 
 /*
  The function getmnt() is Ultrix specific and returns a different
@@ -36,7 +37,6 @@
 
 #include <sys/stat.h>
 #include <sys/mount.h>
-
 
 int
 getmnt( int * /*start*/, struct fs_data buf[], unsigned /*bufsize*/,

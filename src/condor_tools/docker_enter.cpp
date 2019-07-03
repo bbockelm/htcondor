@@ -25,6 +25,9 @@
 #include "shared_port_scm_rights.h"
 #include "fdpass.h"
 
+#include <sys/socket.h>
+
+
 void
 usage( char *cmd )
 {

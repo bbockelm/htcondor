@@ -23,6 +23,10 @@
 #include "selector.h"
 #include "socket_proxy.h"
 
+#ifndef WIN32
+#include <sys/socket.h>
+#endif
+
 SocketProxy::SocketProxy():
 	m_error(false)
 {

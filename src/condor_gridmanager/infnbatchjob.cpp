@@ -35,6 +35,9 @@
 #include "gridmanager.h"
 #include "infnbatchjob.h"
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
 
 // GridManager job states
 #define GM_INIT					0

@@ -24,6 +24,8 @@
 #include "condor_debug.h"
 #include "filename_tools.h"
 
+#include <string.h>
+
 extern "C" char *CondorVersion(void);
 extern "C" char *CondorPlatform(void);
 

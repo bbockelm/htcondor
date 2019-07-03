@@ -20,7 +20,8 @@
 
 #include "condor_common.h"
 #include "condor_crypt_blowfish.h"
-//#include <string.h>
+
+#include <cstring>
 //#include <malloc.h>
 
 #ifdef HAVE_EXT_OPENSSL

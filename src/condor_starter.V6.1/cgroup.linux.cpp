@@ -8,6 +8,8 @@
 
 #if defined(HAVE_EXT_LIBCGROUP)
 
+#include <string.h>
+
 /*
  * Helper functions for flag manipulation.
  */

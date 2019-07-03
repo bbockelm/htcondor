@@ -20,6 +20,8 @@
 #include "condor_common.h"
 #include "condor_distribution.h"
 
+#include <string.h>
+
 // Constructor
 Distribution::Distribution()
 {

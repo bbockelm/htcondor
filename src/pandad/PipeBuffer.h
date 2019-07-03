@@ -4,6 +4,9 @@
 #include <string>
 #include <pthread.h>
 
+#include <cstring>
+
+
 class PipeBuffer {
 	public:
 		// Assumes that _fd is already open() and _mutex already held.

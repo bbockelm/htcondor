@@ -36,6 +36,10 @@
 #include "sig_install.h"
 #include "../condor_privsep/privsep_fork_exec.h"
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 // FreeBSD 6, OS X 10.4, Solaris 5.9 don't automatically give you environ to work with
 extern DLL_IMPORT_MAGIC char **environ;
 

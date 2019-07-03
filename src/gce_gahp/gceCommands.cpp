@@ -31,6 +31,10 @@
 #include "thread_control.h"
 #include <sqlite3.h>
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
+
 using std::string;
 using std::map;
 using std::vector;

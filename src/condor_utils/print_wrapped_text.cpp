@@ -21,6 +21,9 @@
 #include "condor_common.h"
 #include "print_wrapped_text.h"
 
+#include <cstring>
+
+
 void print_wrapped_text(
     const char *text, 
 	FILE *output, 

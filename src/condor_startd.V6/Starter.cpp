@@ -42,6 +42,10 @@
 #include "glexec_starter.linux.h"
 #endif
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 // Keep track of living Starters
 std::map<pid_t, Starter*> living_starters;
 

@@ -24,6 +24,9 @@
 #include "named_pipe_writer.unix.h"
 #include "named_pipe_watchdog.unix.h"
 
+#include <fcntl.h>
+#include <string.h>
+
 bool
 NamedPipeWriter::initialize(const char* addr)
 {

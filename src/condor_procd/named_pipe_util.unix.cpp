@@ -22,6 +22,10 @@
 #include "condor_debug.h"
 #include "named_pipe_util.unix.h"
 
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+
 char*
 named_pipe_make_client_addr(const char* orig_addr,
                             pid_t pid,

@@ -58,6 +58,8 @@
 
 #ifdef WIN32
 #include "exception_handling.WINDOWS.h"
+#else
+#include <signal.h>
 #endif
 
 // Externs to Globals

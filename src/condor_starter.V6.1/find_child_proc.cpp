@@ -2,6 +2,9 @@
 #include "directory.h"
 #include "condor_debug.h"
 
+#include <fcntl.h>
+
+
 #ifdef LINUX
 bool isChildOf(const char *subdir, pid_t parent);
 #endif

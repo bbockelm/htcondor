@@ -3,6 +3,8 @@
 
 #include "PipeBuffer.h"
 
+#include <cstring>
+
 std::string * PipeBuffer::getNextLine() {
 	if( index == bytesReadAhead ) {
 		pthread_mutex_unlock( mutex );

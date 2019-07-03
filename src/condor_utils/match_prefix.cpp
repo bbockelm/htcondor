@@ -20,6 +20,9 @@
 #include "condor_common.h"
 #include "match_prefix.h"
 
+#include <cstring>
+
+
 int
 match_prefix(const char *s1, const char *s2)
 {

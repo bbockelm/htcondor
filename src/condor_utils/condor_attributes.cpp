@@ -23,6 +23,8 @@
 #define _CONDOR_ATTR_MAIN
 #include "condor_attributes.h"
 
+#include <string.h>
+
 // Initialize our logic
 int
 AttrInit( void )

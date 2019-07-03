@@ -22,6 +22,8 @@
 #include "condor_snutils.h"
 #include "condor_debug.h"
 
+#include <string.h>
+
 #include <sstream>
 
 CondorError::CondorError(const CondorError& copy) {

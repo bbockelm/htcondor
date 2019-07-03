@@ -19,6 +19,9 @@
 
 #include "condor_common.h"
 
+#include <cstring>
+
+
 char *
 strnewp( const char *str ) 
 {

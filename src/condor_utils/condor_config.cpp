@@ -93,6 +93,8 @@
 #ifdef WIN32
 // Note inversion of argument order...
 #define realpath(path,resolved_path) _fullpath((resolved_path),(path),_MAX_PATH)
+#else
+#include <pwd.h>
 #endif
 
 // define this to keep param who's values match defaults from going into to runtime param table.
@@ -3312,8 +3314,6 @@ set_runtime_config(char *admin, char *config)
 }
 
 
-extern "C" {
-
 static bool Check_config_source_security(FILE* conf_fp, const char * config_source)
 {
 #ifndef WIN32
@@ -3472,8 +3472,6 @@ process_dynamic_configs()
 	}
 	return 0;
 }
-
-} // end of extern "C"
 
 struct _write_macros_args {
 	FILE * fh;

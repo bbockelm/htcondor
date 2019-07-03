@@ -21,6 +21,8 @@
 #include "condor_common.h"
 #include "translation_utils.h"
 
+#include <cstring>
+
 
 const char *
 getNameFromNum( int num, const struct Translation *table )

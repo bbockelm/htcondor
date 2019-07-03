@@ -21,6 +21,9 @@
 #include "ftgahp_common.h"
 #include "condor_debug.h"
 
+#include <cstring>
+
+
 int
 parse_gahp_command (const char* raw, Gahp_Args* args) {
 

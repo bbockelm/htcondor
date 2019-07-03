@@ -23,8 +23,9 @@
 #include "condor_debug.h"
 #include "util_lib_proto.h"
 
-#ifndef LINT
-#endif /* LINT */
+#ifndef WIN32
+#include <sys/ioctl.h>
+#endif
 
 void
 detach( void )

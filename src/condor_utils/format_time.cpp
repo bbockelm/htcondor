@@ -20,6 +20,7 @@
 
 #include "condor_common.h"
 
+#include <cstring>
 
 /*
   Format a date expressed in "UNIX time" into "month/day hour:minute".

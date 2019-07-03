@@ -22,6 +22,9 @@
 #include "condor_debug.h"
 #include "sysapi.h"
 
+#include <cstring>
+
+
 /*
 ** Try to determine the swap space available on our own machine.  The answer
 ** is in kilobytes.

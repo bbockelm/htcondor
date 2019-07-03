@@ -25,6 +25,8 @@
 #define PARAM_DECLARE_HELP_TABLES 1 // so paramhelp_table will 
 #include "param_info_tables.h"
 
+#include <string.h>
+
 int param_default_help_by_id(int ix, const char * & descrip, const char * & tags, const char * & used_for)
 {
 	descrip = NULL;

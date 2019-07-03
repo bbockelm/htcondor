@@ -27,18 +27,8 @@
 
 #include "condor_common.h"
 
-/* Apparently, in condor_sys_linux.h, we can't include <grp.h> as per the
-	comment that it messes about with standard universe. So instead
-	of trying to fix the larger problem, I'm just going to slam it in right
-	here. This also forces the compilation of this program to only happen
-	on Linux platforms. This is because setgroups() requires priviledge and
-	therefore isn't in POSIX.1-2001 so I can't rely on it being in all OSes
-	at this time. When this feature is desired on other platforms, it can be
-	fixed then. I suspect all platforms actually support it, but may have
-	differing prototypes and be defined in different header files.
-		-psilord 12/15/2010
-*/
 #include <grp.h>
+#include <string.h>
 
 #define ERR_STRLEN 255
 

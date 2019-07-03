@@ -23,8 +23,8 @@
 #include "condor_uid.h"
 #include "credmon_interface.h"
 #include "directory.h"
-#ifdef WIN32
-#else
+#ifndef WIN32
+#include <signal.h>
 #include <fnmatch.h>
 #endif
 

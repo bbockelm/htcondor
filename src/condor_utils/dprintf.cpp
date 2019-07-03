@@ -69,6 +69,10 @@
 # include <time.h>
 #endif
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 #include <sstream>
 
 // define this to have D_TIMESTAMP|D_SUB_SECOND be microseconds rather than milliseconds

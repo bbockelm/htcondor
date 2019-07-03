@@ -30,6 +30,11 @@
 # include <sys/procfs.h>
 #endif
 
+#ifndef WIN32
+#include <fcntl.h>
+#endif
+
+#include <math.h>
 
 size_t pidHashFunc( const pid_t& pid );
 

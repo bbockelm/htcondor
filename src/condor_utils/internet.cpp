@@ -42,6 +42,11 @@
 #include "ipv6_hostname.h"
 #include "condor_sockfunc.h"
 
+#ifndef WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#endif
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

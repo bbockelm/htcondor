@@ -25,6 +25,8 @@
 #include "named_pipe_watchdog.unix.h"
 #include "named_pipe_util.unix.h"
 
+#include <string.h>
+
 bool
 NamedPipeReader::initialize(const char* addr)
 {

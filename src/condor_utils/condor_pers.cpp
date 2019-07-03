@@ -22,6 +22,8 @@
 #include "condor_debug.h"
 #include "condor_pers.h"
 
+#include <string.h>
+
 void patch_personality(void)
 {
 

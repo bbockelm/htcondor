@@ -22,6 +22,8 @@
 #include "subsystem_info.h"
 #include "strcasestr.h"
 #include <stdio.h>
+#include <cstring>
+
 
 static SubsystemInfo *mySubSystem = NULL;
 

@@ -6,6 +6,8 @@
 
 #ifdef WIN32
 #define CURL_STATICLIB // this has to match the way the curl library was built.
+#else
+#include <netdb.h>
 #endif
 
 #include <curl/curl.h>

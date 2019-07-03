@@ -22,6 +22,7 @@
 #include "sig_install.h"
 #include "condor_debug.h"
 
+#include <signal.h>
 
 #ifdef __cplusplus 
 extern "C" {

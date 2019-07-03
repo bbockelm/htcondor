@@ -29,6 +29,8 @@
 #include "ipv6_hostname.h"
 #include "selector.h"
 
+#include <netdb.h>
+
 /*
  * FYI: This code is used by the old shadow/starter and by the syscall lib
  * lib linked inside the job. The other daemons use the do_connect in

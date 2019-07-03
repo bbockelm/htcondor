@@ -24,7 +24,11 @@
 
 #if defined(WIN32)
 #include "process_control.WINDOWS.h"
+#else
+#include <signal.h>
 #endif
+
+#include <string.h>
 
 void
 send_signal(pid_t pid, int sig)

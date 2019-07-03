@@ -27,6 +27,8 @@
 #  include "pcre.h"
 #endif
 
+#include <cfloat>
+#include <string.h>
 
 //param_info_hash_t = bucket_t**
 //bucket_t** param_info;

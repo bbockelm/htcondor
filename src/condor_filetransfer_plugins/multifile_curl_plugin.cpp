@@ -14,6 +14,10 @@
 #include <stdexcept>
 #include <rapidjson/document.h>
 
+#ifndef WIN32
+#include <netdb.h>
+#endif
+
 #define MAX_RETRY_ATTEMPTS 20
 
 namespace {

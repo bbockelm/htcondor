@@ -24,6 +24,8 @@
 #include "condor_environ.h"
 #include "condor_debug.h"
 
+#include <string.h>
+
 // Initialize our logic
 int
 EnvInit( void )

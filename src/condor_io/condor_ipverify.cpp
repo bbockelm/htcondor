@@ -31,6 +31,11 @@
 #include "ipv6_hostname.h"
 #include "condor_netaddr.h"
 
+#ifndef WIN32
+#include <arpa/inet.h>
+#include <netinet/tcp.h>
+#endif
+
 // Externs to Globals
 
 const char TotallyWild[] = "*";

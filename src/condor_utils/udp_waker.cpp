@@ -29,6 +29,12 @@
 #include "daemon.h"
 #include "condor_sinful.h"
 
+#ifndef WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#endif
+
 #ifndef INADDR_NONE		/* Solaris */
 #  define INADDR_NONE	((in_addr_t) 0xffffffff)
 #endif

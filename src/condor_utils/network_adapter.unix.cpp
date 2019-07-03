@@ -22,6 +22,7 @@
 #include "internet.h"
 #include "network_adapter.unix.h"
 
+#include <arpa/inet.h>
 
 /***************************************************************
 * UnixNetworkAdapter class

@@ -9,6 +9,10 @@
 #include "ipv6_addrinfo.h"
 #include "my_hostname.h"
 
+#ifndef WIN32
+#include <netdb.h>
+#endif
+
 static condor_sockaddr local_ipaddr;
 static condor_sockaddr local_ipv4addr;
 static condor_sockaddr local_ipv6addr;

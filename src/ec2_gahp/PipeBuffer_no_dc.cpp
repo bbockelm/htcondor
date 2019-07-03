@@ -22,6 +22,9 @@
 #include "PipeBuffer.h"
 #include "thread_control.h"
 
+#include <cstring>
+
+
 PipeBuffer::PipeBuffer (int _pipe_end) {
 	pipe_end = _pipe_end;
 	error = false;

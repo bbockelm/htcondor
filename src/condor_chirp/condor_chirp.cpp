@@ -29,6 +29,12 @@
 #include <stdlib.h>
 #include "MyString.h"
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
+#include <errno.h>
+
 // the documentation for the chirp tool is that it returns 1 on failure, so that is what we will do.
 // when the chirp_client API calls abort().
 void abort_handler(int /*signum*/) { exit(1); }

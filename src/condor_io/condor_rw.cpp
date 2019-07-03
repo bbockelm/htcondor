@@ -29,6 +29,9 @@
 #include "condor_threads.h"
 #include "condor_sockfunc.h"
 
+#include <fcntl.h>
+
+
 /*
  * Returns true if the given error number indicates
  * a temporary condition that may immediately be retried.

@@ -22,6 +22,9 @@
 #include "CryptKey.h"
 #include "condor_debug.h"
 
+#include <cstring>
+
+
 KeyInfo:: KeyInfo()
     : keyData_    (0),
       keyDataLen_ (0),

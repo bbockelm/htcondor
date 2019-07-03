@@ -2,6 +2,10 @@
 #include "condor_netaddr.h"
 #include "internet.h"
 
+#ifndef WIN32
+#include <arpa/inet.h>
+#endif
+
 condor_netaddr::condor_netaddr() : maskbit_((unsigned int)-1), matchesEverything( false ) {
 }
 

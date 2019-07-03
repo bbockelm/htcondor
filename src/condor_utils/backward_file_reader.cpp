@@ -21,6 +21,7 @@
 #include "condor_debug.h"
 #include "backward_file_reader.h"
 
+#include <string.h>
 
 BackwardFileReader::BWReaderBuffer::BWReaderBuffer(int cb/*=0*/, char * input /* = NULL*/)
 	: data(input)

@@ -22,6 +22,9 @@
 #include "condor_debug.h"
 #include "stringSpace.h"
 
+#include <cstring>
+
+
 const char *
 StringSpace::
 strdup_dedup(const char *input)

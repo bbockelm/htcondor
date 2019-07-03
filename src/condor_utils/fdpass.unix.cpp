@@ -21,6 +21,10 @@
 #include "condor_debug.h"
 #include "fdpass.h"
 
+#include <sys/socket.h>
+
+#include <string.h>
+
 int
 fdpass_send(int uds_fd, int fd)
 {

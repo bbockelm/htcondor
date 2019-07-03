@@ -29,6 +29,7 @@ IMPORTANT NOTE: Don't dprintf() in here, unless its a fatal error! */
 #include "HashTable.h"
 #include "condor_random_num.h"
 
+#include <pwd.h>
 
 passwd_cache::passwd_cache() {
 

@@ -20,6 +20,9 @@
  
 #include "condor_common.h"
 
+#include <cstring>
+
+
 #if !defined(WIN32)
 
 struct SigTable { int num; char name [9]; };

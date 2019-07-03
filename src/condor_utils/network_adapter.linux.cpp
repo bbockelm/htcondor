@@ -39,6 +39,8 @@
 #  include <linux/ethtool.h>
 #endif
 
+#include <sys/ioctl.h>
+
 // For now, the only wake-on-lan type we use is UDP magic
 #if defined(HAVE_LINUX_ETHTOOL_H)
 # define WAKE_MASK	( 0 | (WAKE_MAGIC) )

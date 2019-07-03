@@ -29,6 +29,10 @@
 #include "condor_ver_info.h"
 #include "classy_counted_ptr.h"
 
+#ifndef WIN32
+#include <utime.h>
+#endif
+
 enum CONDOR_MD_MODE {
     MD_OFF        = 0,         // off
     MD_ALWAYS_ON,              // always on, condor will check MAC automatically

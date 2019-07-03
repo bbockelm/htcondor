@@ -28,6 +28,10 @@
 #include "condor_id.h"
 #include "userlog_to_classads.h"
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
+
 typedef long condor_time_t;
 static condor_time_t getEventTime(const ULogEvent *event)
 {

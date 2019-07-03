@@ -26,6 +26,7 @@
 #include "simplelist.h"
 #include "extArray.h"
 
+#include <cfloat>
 #include <vector>
 #include <string>
 #include <limits>

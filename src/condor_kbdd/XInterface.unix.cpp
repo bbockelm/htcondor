@@ -42,6 +42,7 @@
 #endif
 
 #include <setjmp.h>
+#include <pwd.h>
 
 #if defined(LINUX)
 	static const char *UtmpName = "/var/run/utmp";

@@ -22,6 +22,8 @@
 #include "condor_common.h" 
 #include "printf_format.h"
 
+#include <cstring>
+
 
 /* A couple of private helper-functions we need for our
    parsePrintfFormat() function below...

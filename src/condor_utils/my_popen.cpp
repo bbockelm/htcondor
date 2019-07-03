@@ -29,10 +29,10 @@
 #include "../condor_privsep/privsep_fork_exec.h"
 #include "setenv.h"
 
-#ifdef WIN32
-#else
+#ifndef WIN32
 #include <poll.h>
 #include <fcntl.h>
+#include <signal.h>
 #endif
 
 #ifdef WIN32

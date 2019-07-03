@@ -27,6 +27,8 @@
 #endif
 #include "condor_debug.h"
 
+#include <cstring>
+
 
 Condor_Crypt_Base :: Condor_Crypt_Base(Protocol prot, const KeyInfo& keyInfo)
     : keyInfo_ (keyInfo)

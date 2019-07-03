@@ -23,6 +23,8 @@
 #include "condor_syscall_mode.h"
 #include "limit.h"
 
+#include <cstring>
+
 extern "C" {
 
 void

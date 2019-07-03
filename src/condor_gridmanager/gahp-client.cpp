@@ -37,6 +37,10 @@
 #include "gridmanager.h"
 #include "boincjob.h"
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
+
 using std::set;
 using std::vector;
 using std::pair;

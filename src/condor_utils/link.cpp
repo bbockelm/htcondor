@@ -21,6 +21,8 @@
 #include "condor_debug.h"
 #include "link.h"
 
+#include <string.h>
+
 #if defined(WIN32)
 
 int

@@ -35,6 +35,10 @@
 
 #define	DEFAULT_CONFIG_SERVER_PORT		    9600
 
+#ifndef WIN32
+#include <sys/socket.h>
+#endif
+
 #if defined(__cplusplus)
 extern "C" {
 #endif

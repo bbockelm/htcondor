@@ -27,12 +27,7 @@
 
 #include "condor_common.h"
 
-#if 0   /* There are all pulled in via condor_common.h */
-#include <sys/types.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-#endif
 
 #include "my_getopt.h"
 

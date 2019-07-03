@@ -21,6 +21,8 @@
 #include "condor_common.h"
 #include "interval.h"
 
+#include <cfloat>
+
 #include <iostream>
 
 using namespace std;

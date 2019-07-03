@@ -25,6 +25,7 @@
 #include "condor_constants.h"
 #include "list.h"
 
+#include <string.h>
 
 /*
   This primitive class is used to contain and search arrays of strings.

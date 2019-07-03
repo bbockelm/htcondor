@@ -21,6 +21,8 @@
 #include "filename_tools.h"
 #include "basename.h"
 
+#include <string.h>
+
 void filename_url_parse_malloc( char const *input, char **method, char **server, int *port, char **path )
 {
 	char const *p;

@@ -31,6 +31,10 @@
 #include "ccb_client.h"
 #include "condor_sockfunc.h"
 
+#ifndef WIN32
+#include <netinet/tcp.h>
+#endif
+
 #define NORMAL_HEADER_SIZE 5
 #define MAX_HEADER_SIZE MAC_SIZE + NORMAL_HEADER_SIZE
 

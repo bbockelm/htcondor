@@ -25,6 +25,10 @@
 #include "java_config.h"
 #include "my_popen.h"
 
+#ifndef WIN32
+#include <signal.h>
+#endif
+
 ClassAd * java_detect()
 {
 	MyString path;

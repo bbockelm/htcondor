@@ -166,6 +166,8 @@ ProcAPI::getAllPids( pid_t* &pids, int &numpids ) {
 
 #else
 
+#include <pwd.h>
+
 /* This function returns a list of pids that are 'descendents' of that pid.
      I call this a 'family' of pids.  This list is put into pidFamily, which
      I assume is an already-allocated array.  This array will be terminated

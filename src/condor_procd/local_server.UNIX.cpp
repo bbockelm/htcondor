@@ -26,6 +26,8 @@
 #include "named_pipe_writer.unix.h"
 #include "named_pipe_util.unix.h"
 
+#include <string.h>
+
 LocalServer::LocalServer() :
 	m_initialized(false),
 	m_watchdog_server(NULL),

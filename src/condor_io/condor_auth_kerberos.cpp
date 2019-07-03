@@ -35,6 +35,8 @@
 #include <dlfcn.h>
 #endif
 
+#include <arpa/inet.h>
+
 const char STR_KERBEROS_SERVER_KEYTAB[]   = "KERBEROS_SERVER_KEYTAB";
 const char STR_KERBEROS_SERVER_PRINCIPAL[]= "KERBEROS_SERVER_PRINCIPAL";
 const char STR_KERBEROS_SERVER_USER[]     = "KERBEROS_SERVER_USER";

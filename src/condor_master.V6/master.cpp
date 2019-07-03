@@ -64,6 +64,9 @@ extern int load_master_mgmt(void);
 
 extern DWORD start_as_service();
 extern void terminate(DWORD);
+
+#else
+#include <pwd.h>
 #endif
 
 

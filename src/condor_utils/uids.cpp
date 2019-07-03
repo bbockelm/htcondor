@@ -30,6 +30,10 @@
 #include "store_cred.h"
 #include "../condor_sysapi/sysapi.h"
 
+#ifndef WIN32
+#include <pwd.h>
+#endif
+
 /* See condor_uid.h for description. */
 static char* CondorUserName = NULL;
 static char* RealUserName = NULL;

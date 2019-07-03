@@ -23,6 +23,8 @@
 #include "named_pipe_watchdog_server.unix.h"
 #include "named_pipe_util.unix.h"
 
+#include <string.h>
+
 bool
 NamedPipeWatchdogServer::initialize(const char* path)
 {

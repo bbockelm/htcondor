@@ -27,6 +27,10 @@
 #include "condor_sockfunc.h"
 #include "condor_config.h"
 
+#ifndef WIN32
+#include <arpa/inet.h>
+#endif
+
 #define USABLE_PACKET_SIZE m_SAFE_MSG_FRAGMENT_SIZE - SAFE_MSG_HEADER_SIZE
 const char THIS_IS_TOO_UGLY_FOR_THE_SAKE_OF_BACKWARD[] = "CRAP";
 static const int SAFE_MSG_CRYPTO_HEADER_SIZE = 10;

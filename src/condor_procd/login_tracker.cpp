@@ -127,6 +127,8 @@ LoginTracker::LoginTag::test(procInfo* pi)
 
 #else
 
+#include <pwd.h>
+
 // constructor on UNIX looks up the UID for the login name
 //
 LoginTracker::LoginTag::LoginTag(char* login) : m_login(login)

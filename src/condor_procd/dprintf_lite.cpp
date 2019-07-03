@@ -23,6 +23,7 @@
 
 #if !defined(WIN32)
 #include "syslog.h"
+#include <string.h>
 #endif
 
 FILE* debug_fp = NULL;

@@ -67,6 +67,8 @@
 
 #include "condor_common.h"
 
+#include <string.h>
+
 /*
 ** Represent a moment in time by a 5 element tuple
 ** (month,day,hour,minute,second)

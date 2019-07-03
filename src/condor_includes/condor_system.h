@@ -126,48 +126,6 @@
 #	define _POSIX_ARG_MAX 4096
 #endif
 
-
-/**********************************************************************
-** We'll also include everything we use after this so we make sure
-** we've got what we need on all platforms.  Headers that have already
-** been fixed will simply be ignored since they define their own flags
-** to prevent multiple inclusions. 
-**********************************************************************/
-
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <stdarg.h>
-#include <signal.h>
-#include <string.h>
-#include <strings.h>
-#include <sys/param.h>
-#include <sys/file.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <sys/uio.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <sys/resource.h>
-#include <limits.h>
-#include <ctype.h>
-#include <fcntl.h>	
-#include <errno.h>
-#include <pwd.h>
-#include <time.h>
-#include <sys/time.h>
-#include <sys/times.h>
-#include <float.h>
-#include <math.h>
-#include <utime.h>
-
-#include "condor_unsetenv.h"
-
 #endif /* UNIX */
 
 

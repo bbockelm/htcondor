@@ -26,6 +26,8 @@
 #endif
 
 #include "memory_file.h"
+#include <fcntl.h>
+#include <cstring>
 #include <iostream>
 using namespace std;
 

@@ -22,6 +22,9 @@
 #define IPV6_ADDRINFO_H
 
 //#include <string>
+#ifndef WIN32
+#include <netdb.h>
+#endif
 
 struct shared_context;
 // an iterator and a smart pointer for addrinfo structure

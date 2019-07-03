@@ -23,6 +23,8 @@
 #include "condor_common.h"
 #include "basename.h"
 
+#include <string.h>
+
 /*
   A basename() function that is happy on both Unix and NT.
   It returns a pointer to the last element of the path it was given,

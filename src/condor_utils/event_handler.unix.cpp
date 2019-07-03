@@ -28,7 +28,7 @@
 #include "name_tab.h"
 #include "event_handler.unix.h"
 
-
+#include <signal.h>
 
 static NAME_VALUE SigNameArray[] = {
 	{ SIGABRT, "SIGABRT" },

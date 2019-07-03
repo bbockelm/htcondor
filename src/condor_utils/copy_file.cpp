@@ -21,6 +21,8 @@
 #include "condor_common.h"
 #include "condor_debug.h"
 
+#include <fcntl.h>
+
 extern "C"
 {
 int copy_file(const char *old_filename, const char *new_filename);

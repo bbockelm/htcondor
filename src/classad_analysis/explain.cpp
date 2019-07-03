@@ -21,6 +21,9 @@
 #include "condor_common.h"
 #include "explain.h"
 
+#include <cfloat>
+
+
 using namespace std;
 
 // Explain methods

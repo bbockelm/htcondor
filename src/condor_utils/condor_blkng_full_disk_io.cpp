@@ -19,6 +19,8 @@
 
 #include "condor_common.h"
 
+#include <errno.h>
+
 /* 
 	This file implementes blocking read/write operations on regular
 	files. The main purpose is to try very hard to read/write however

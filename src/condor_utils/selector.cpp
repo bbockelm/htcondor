@@ -25,6 +25,8 @@
 #include "selector.h"
 #include "condor_threads.h"
 
+#include <string.h>
+
 #ifndef SELECTOR_USE_POLL
 #define POLLIN 1
 #define POLLOUT 2

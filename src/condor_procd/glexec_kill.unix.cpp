@@ -21,6 +21,8 @@
 #include "condor_debug.h"
 #include "glexec_kill.unix.h"
 
+#include <string.h>
+
 static char* glexec_kill_path = NULL;
 static char* glexec_path = NULL;
 static char glexec_retries_str[50];

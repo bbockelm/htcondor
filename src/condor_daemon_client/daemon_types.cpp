@@ -21,6 +21,9 @@
 #include "condor_common.h"
 #include "daemon_types.h"
 
+#include <cstring>
+
+
 static const char* daemon_names[] = {
 	"none",
 	"any",

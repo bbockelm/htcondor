@@ -24,6 +24,7 @@
 #include "secure_file.h"
 #include "condor_uid.h"
 
+#include <fcntl.h>
 
 // trivial scramble on password file to prevent accidental viewing
 // NOTE: its up to the caller to ensure scrambled has enough room

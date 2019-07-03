@@ -20,6 +20,8 @@
 #include <dlfcn.h>
 #endif
 
+#include <sys/socket.h>
+
 #include "systemd_manager.h"
 
 #include "condor_debug.h"

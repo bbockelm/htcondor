@@ -34,6 +34,7 @@
 #include <stdio.h>
 #if defined(UNIX)
 # include <unistd.h>
+#include <signal.h>
 # define ENABLE_WORKERS
 #endif
 #include <math.h>
@@ -42,6 +43,8 @@
 
 #ifdef WIN32
 # define usleep(_x_) Sleep((_x_)/1000)
+#else
+#include <pwd.h>
 #endif
 using namespace std;
 

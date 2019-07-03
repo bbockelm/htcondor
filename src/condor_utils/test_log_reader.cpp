@@ -34,6 +34,8 @@
 #undef SIGABRT
 #include <signal.h>
 #undef SIGABRT
+#else
+#include <signal.h>
 #endif
 
 static const char *	VERSION = "0.9.5";

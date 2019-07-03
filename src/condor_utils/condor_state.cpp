@@ -20,6 +20,8 @@
 #include "condor_common.h"
 #include "condor_state.h"
 
+#include <string.h>
+
 static const char* condor_states [] = 
 { "None", "Owner", "Unclaimed", "Matched",  "Claimed", "Preempting",
   "Shutdown", "Delete", "Backfill", "Drained" };

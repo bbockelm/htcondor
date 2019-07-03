@@ -31,6 +31,10 @@
 #endif
 #endif
 
+#include <string.h>
+#include <fcntl.h>
+
+
 class MD_Context {
 public:
 #ifdef HAVE_EXT_OPENSSL

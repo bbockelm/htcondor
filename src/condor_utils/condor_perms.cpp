@@ -20,6 +20,8 @@
 #include "condor_common.h"
 #include "condor_perms.h"
 
+#include <string.h>
+
 const char*
 PermString( DCpermission perm )
 {

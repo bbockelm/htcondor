@@ -21,6 +21,9 @@
 #include "condor_common.h"
 #include "command_strings.h"
 #include "condor_perms.h"
+
+#include <string.h>
+
 #include <map>
 
 #define USE_GENERATED_CMD_TABLES

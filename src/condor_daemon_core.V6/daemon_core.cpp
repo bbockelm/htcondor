@@ -112,6 +112,12 @@ CRITICAL_SECTION Big_fat_mutex; // coarse grained mutex for debugging purposes
 #define CLONE_NEWPID 0x20000000
 #endif
 
+#ifndef WIN32
+#include <arpa/inet.h>
+#include <netinet/tcp.h>
+#include <signal.h>
+#endif
+
 #include "systemd_manager.h"
 
 static const char* EMPTY_DESCRIP = "<NULL>";

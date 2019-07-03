@@ -5,6 +5,11 @@
 #include "ipv6_hostname.h"
 #include "condor_debug.h"
 
+#ifndef WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#endif
+
 #include <sstream>
 
 //

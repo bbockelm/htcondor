@@ -21,6 +21,8 @@
 #include "condor_common.h"
 #include "nullfile.h"
 
+#include <cstring>
+
 int 
 nullFile(const char *filename)
 {

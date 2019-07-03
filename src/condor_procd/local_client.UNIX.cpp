@@ -26,6 +26,8 @@
 #include "named_pipe_watchdog.unix.h"
 #include "named_pipe_util.unix.h"
 
+#include <string.h>
+
 double pfc_lc_rt_start_connection = 0;
 double pfc_lc_rt_open_pipe = 0;
 double pfc_lc_rt_wait_pipe = 0;

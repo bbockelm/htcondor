@@ -27,6 +27,8 @@
 #include "condor_cron_param.h"
 #include "condor_cron_job_params.h"
 
+#include <cfloat>
+
 // Job Managers parameters -- base version
 class CronJobMgrParams : public CronParamBase
 {

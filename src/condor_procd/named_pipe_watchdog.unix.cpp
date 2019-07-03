@@ -22,6 +22,9 @@
 #include "condor_debug.h"
 #include "named_pipe_watchdog.unix.h"
 
+#include <fcntl.h>
+#include <string.h>
+
 bool
 NamedPipeWatchdog::initialize(const char* path)
 {
