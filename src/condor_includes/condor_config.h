@@ -20,8 +20,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#if defined(__cplusplus)
-
 #include "condor_classad.h"
 #include "MyString.h"
 #include "string_list.h"
@@ -36,12 +34,6 @@ typedef std::vector<const char *> MACRO_SOURCES;
 class CondorError;
 namespace condor_params { typedef struct key_value_pair key_value_pair; }
 typedef const struct condor_params::key_value_pair MACRO_DEF_ITEM;
-#else // ! __cplusplus
-typedef void* MACRO_SOURCES; // placeholder for use in C
-typedef void  CondorError;   // placeholder for use in C
-typedef struct key_value_pair { const char * key; const void * def; } key_value_pair;
-typedef const struct key_value_pair MACRO_DEF_ITEM;
-#endif
 
 #include "pool_allocator.h"
 //#include "param_info.h"
@@ -102,12 +94,10 @@ typedef struct macro_set {
 	MACRO_SOURCES sources;
 	MACRO_DEFAULTS * defaults; // optional reference to const defaults table
 	CondorError * errors; // optional error stack, if non NULL, use instead of fprintf to stderr
-#ifdef __cplusplus
 	// fprintf an error if the above errors field is NULL, otherwise format an error and add it to the above errorstack
 	// the preface is printed with fprintf but not with the errors stack.
 	void push_error(FILE * fh, int code, const char* preface, const char* format, ... ) CHECK_PRINTF_FORMAT(5,6);
 	void initialize(int opts);
-#endif
 } MACRO_SET;
 
 // Used as the header for a MACRO_SET checkpoint, the actual allocation is larger than this.
@@ -127,16 +117,13 @@ typedef struct macro_eval_context {
 	char use_mask;
 	char also_in_config; // also do lookups in the config hashtable (used by submit)
 	char is_context_ex;
-#if defined(__cplusplus)
 	void init(const char * sub, char mask=2) {
 		memset(this, 0, sizeof(*this));
 		this->subsys = sub;
 		this->use_mask = mask;
 	}
-#endif
 } MACRO_EVAL_CONTEXT;
 
-#if defined(__cplusplus)
 typedef struct macro_eval_context_ex : macro_eval_context {
 	// to do lookups of last resort into the given Ad, set these. they are useually null.
 	const char *adname; // name prefix for lookups into the ad
@@ -148,10 +135,8 @@ typedef struct macro_eval_context_ex : macro_eval_context {
 		this->is_context_ex = true;
 	}
 } MACRO_EVAL_CONTEXT_EX;
-#endif
 
 
-#if defined(__cplusplus)
 	extern MyString global_config_source;
 	extern MyString global_root_config_source;
 	extern StringList local_config_sources;
@@ -345,7 +330,6 @@ typedef struct macro_eval_context_ex : macro_eval_context {
 /* here we provide C linkage to C++ defined functions. This seems a bit
 	odd since if a .c file includes this, these prototypes technically don't
 	exist.... */
-extern "C" {
 	#define CONFIG_OPT_WANT_META      0x01   // also keep metdata about config
 	#define CONFIG_OPT_KEEP_DEFAULTS  0x02   // keep items that match defaults
 	#define CONFIG_OPT_OLD_COM_IN_CONT 0x04  // ignore # after \ (i.e. pre 8.1.3 comment/continue behavior)
@@ -367,7 +351,7 @@ extern "C" {
 	bool config_continue_if_no_config(bool contin);
 	void config_fill_ad( ClassAd*, const char *prefix = NULL );
 	void condor_net_remap_config( bool force_param=false );
-	int param_integer_c( const char *name, int default_value,
+	extern "C" int param_integer_c( const char *name, int default_value,
 					   int min_value, int max_value, bool use_param_table = true );
     //int  param_boolean_int( const char *name, int default_value, bool use_param_table = true );
     int  param_boolean_int_with_default( const char *name );
@@ -381,7 +365,6 @@ extern "C" {
 	// make sure that live_value stays in scope until you put the old value back
 	const char * set_live_param_value(const char * name, const char * live_value);
 	bool find_user_file(MyString & filename, const char * basename, bool check_access);
-} // end extern "C"
 
 
 // the HASHITER can only be defined with c++ linkage
@@ -423,9 +406,7 @@ void foreach_param_matching(Regex & re, int options, bool (*fn)(void* user, HASH
 expand_param(), expand config variables $() against the current config table and return an strdup'd string with the result
 the char* return value should be freed using free()
 */
-BEGIN_C_DECLS
 char * expand_param (const char *str); // same as below but defaults subsys and use flags
-END_C_DECLS
 char * expand_param (const char *str, const char * localname, const char *subsys, int use);
 inline bool expand_param (const char *str, std::string & expanded) {
 	char * p = expand_param(str);
@@ -444,8 +425,6 @@ inline bool expand_param (const char *str, std::string & expanded) {
 #define WRITE_MACRO_OPT_SOURCE_COMMENT  0x20 // include comments showing source of values
 int write_macros_to_file(const char* pathname, MACRO_SET& macro_set, int options);
 int write_config_file(const char* pathname, int options);
-
-extern "C" {
 
 	/** Find next $$(MACRO) or $$([expression]) in value
 		search begins at pos and continues to terminating null
@@ -469,18 +448,12 @@ extern "C" {
 	int next_dollardollar_macro(char * value, int pos, char** left, char** name, char** right);
 
 	void init_config (int options);
-}
-
-#endif // __cplusplus
-
-BEGIN_C_DECLS
 
 	char * get_tilde(void);
 	char * param ( const char *name );
 	// do param lookup with explicit subsys and localname
 	char * param_with_context ( const char *name, const char *subsys, const char *localname, const char * cwd );
 
-#ifdef __cplusplus
 	// do param lookup with explicit subsys and localname
 	char * param_ctx (const char *name, MACRO_EVAL_CONTEXT & ctx);
 
@@ -677,8 +650,6 @@ BEGIN_C_DECLS
 
 	int Close_macro_source(FILE* conf_fp, MACRO_SOURCE& source, MACRO_SET& macro_set, int parsing_return_val);
 
-#endif // __cplusplus
-
 
 	struct _macro_stats {
 		int cbStrings;
@@ -712,8 +683,6 @@ BEGIN_C_DECLS
    is_daemon=true or vice versa are equivalent.
 */
 void condor_auth_config(int is_daemon);
-
-END_C_DECLS
 
 #endif /* CONFIG_H */
 

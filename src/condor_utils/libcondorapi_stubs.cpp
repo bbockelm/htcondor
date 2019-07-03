@@ -116,7 +116,6 @@ int condor_fdatasync(int, const char*)
 	return 0;
 }
 
-BEGIN_C_DECLS
 void
 config( int, bool )
 {
@@ -149,7 +148,7 @@ int param_boolean_int(const char *, int default_value)
 	return default_value;
 }
 
-int param_integer_c(const char *, int default_value, int /*min_val*/, int /*max_val*/ )
+extern "C" int param_integer_c(const char *, int default_value, int /*min_val*/, int /*max_val*/ )
 {
 	return default_value;
 }
@@ -191,7 +190,6 @@ int  pcre_get_substring_list(const char *, int *, int, const char ***)
 
 #endif
 
-END_C_DECLS
 int param_integer(const char *, int default_value, int, int, ClassAd *, 
 	ClassAd *, bool)
 {

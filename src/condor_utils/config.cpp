@@ -211,10 +211,6 @@ getline_implementation( T & src, int requested_bufsize, int options, int & line_
 }
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
 #ifdef GETLINE_IMPL_IS_TEMPLATE
 // changed to a template and moved out of extern "C" block.
 #else
@@ -2357,20 +2353,20 @@ int get_macro_ref_count (const char *name, MACRO_SET & set)
 
 
 // These provide external linkage to the getline_implementation function for use by non-config code
-extern "C" char * getline_trim( FILE *fp ) {
+char * getline_trim( FILE *fp ) {
 	int lineno=0;
 	const int options = CONFIG_GETLINE_OPT_CONTINUE_MAY_BE_COMMENTED_OUT | CONFIG_GETLINE_OPT_COMMENT_DOESNT_CONTINUE;
 	FileStarLineSource ls(fp);
 	return getline_implementation(ls, _POSIX_ARG_MAX, options, lineno);
 }
-extern "C++" char * getline_trim( FILE *fp, int & lineno, int mode ) {
+char * getline_trim( FILE *fp, int & lineno, int mode ) {
 	const int default_options = CONFIG_GETLINE_OPT_CONTINUE_MAY_BE_COMMENTED_OUT | CONFIG_GETLINE_OPT_COMMENT_DOESNT_CONTINUE;
 	const int simple_options = 0;
 	int options = (mode & GETLINE_TRIM_SIMPLE_CONTINUATION) ? simple_options : default_options;
 	FileStarLineSource ls(fp);
 	return getline_implementation(ls,_POSIX_ARG_MAX, options, lineno);
 }
-extern "C++" char * getline_trim( MacroStream & ms, int mode ) {
+char * getline_trim( MacroStream & ms, int mode ) {
 	const int default_options = CONFIG_GETLINE_OPT_CONTINUE_MAY_BE_COMMENTED_OUT | CONFIG_GETLINE_OPT_COMMENT_DOESNT_CONTINUE;
 	const int simple_options = 0;
 	int options = (mode & GETLINE_TRIM_SIMPLE_CONTINUATION) ? simple_options : default_options;
@@ -2524,8 +2520,6 @@ getline_implementation( FILE *fp, int requested_bufsize, int options, int & line
 	}
 }
 #endif
-
-} // end of extern "C"
 
 /* 
 ** Utility function to get an integer from a string.

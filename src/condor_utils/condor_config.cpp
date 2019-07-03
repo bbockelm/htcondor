@@ -100,8 +100,6 @@
 // define this to parse for #opt:newcomment/#opt:oldcomment to decide commenting rules
 #define PARSE_CONFIG_TO_DECIDE_COMMENT_RULES
 
-extern "C" {
-	
 // Function prototypes
 bool real_config(const char* host, int wantsQuiet, int config_options);
 //int Read_config(const char*, int depth, MACRO_SET& macro_set, int, bool, const char * subsys, std::string & errmsg);
@@ -123,7 +121,6 @@ static int  process_dynamic_configs();
 
 // External variables
 //extern int	ConfigLineNo;
-}  /* End extern "C" */
 
 // pull from config.cpp
 extern "C++" void param_default_set_use(const char * name, int use, MACRO_SET & set);
@@ -2646,7 +2643,7 @@ expand_param(const char *str, const char * localname, const char *subsys, int us
 ** If the value is not defined or not a valid, then
 ** return the default_value argument.
 */
-extern "C" int
+int
 param_boolean_int( const char *name, int default_value ) {
     bool default_bool;
     default_bool = default_value == 0 ? false : true;

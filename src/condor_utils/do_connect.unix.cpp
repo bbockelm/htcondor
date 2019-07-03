@@ -35,7 +35,6 @@
  * condor_io/sock.C
  *
  */
-extern "C" {
 unsigned short find_port_num( const char *service_name,
 							  unsigned short dflt_port );
 char *mk_config_name( const char *service_name );
@@ -47,7 +46,6 @@ int do_connect_with_timeout( const char* host, const char* service,
 							 u_short port, int timeout );
 int set_fd_blocking(int fd);
 int set_fd_nonblocking(int fd);
-}
 
 unsigned short
 find_port_num( const char* service_name, unsigned short dflt_port )
