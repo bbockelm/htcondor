@@ -123,6 +123,101 @@ extern "C"
 {
 	void schedule_event ( int month, int day, int hour, int minute, int second, SIGNAL_HANDLER );
 }
+
+
+struct TokenRequestContinuation {
+	std::unique_ptr<DCSchedd> m_schedd;
+	std::string m_peer_location;
+};
+
+
+int
+CollectorDaemon::schedd_token_request(int, Stream *stream)
+{
+	classad::ClassAd ad;
+	if (!getClassAd(stream, ad) ||
+		!stream->end_of_message())
+	{
+		dprintf(D_FULLDEBUG, "schedd_token_request: failed to read input from client\n");
+		return false;
+	}
+
+	int error_code = 0;
+	std::string error_string;
+
+	const char *fqu = static_cast<Sock*>(stream)->getFullyQualifiedUser();
+	if (!fqu) {
+		error_code = 1;
+		error_string = "Missing requester identity.";
+	}
+
+	std::string authz_list_str;
+	ad.EvaluateAttrString(ATTR_SEC_LIMIT_AUTHORIZATION, authz_list_str);
+	int requested_lifetime = -1;
+	ad.EvaluateAttrInt(ATTR_SEC_TOKEN_LIFETIME, requested_lifetime);
+
+	if (!stream->get_encryption()) {
+		error_code = 3;
+		error_string = "Request to server was not encrypted.";
+	}
+
+		// Lookup schedd ad
+	std::string schedd_name;
+	if (!ad.EvaluateAttrString(ATTR_NAME, schedd_name)) {
+		error_code = 4;
+		error_string = "No schedd target specified.";
+	}
+	std::string capability, schedd_addr;
+	if (!error_code && !collector.walkConcreteTable(SCHEDD_AD, [&](compat_classad::ClassAd *ad) -> int {
+			std::string local_schedd_name;
+			if (!ad ||
+				!ad->EvaluateAttrString(ATTR_NAME, local_schedd_name) ||
+				(schedd_name != local_schedd_name) ||
+				!ad->EvaluateAttrString(ATTR_CAPABILITY, capability) ||
+				!ad->EvaluateAttrString(ATTR_MY_ADDRESS, schedd_addr))
+			{
+				return 1;
+			}
+			return 0; 
+		}))
+	{
+		error_code = 4;
+		error_string = "Failed to walk the schedd table.";
+	}
+	if (schedd_addr.empty()) {
+		error_code = 5;
+		error_string = "Schedd is not known to the collector.";
+	}
+
+	auto peer_location = static_cast<Sock*>(stream)->peer_ip_str();
+
+	classad::ClassAd result_ad;
+	classad::ClassAd request_ad;
+	if (error_code) {
+		result_ad.InsertAttr(ATTR_ERROR_STRING, error_string);
+		result_ad.InsertAttr(ATTR_ERROR_CODE, error_code);
+		// Bail out early if we had an error.
+		if (!putClassAd(stream, result_ad) ||
+			!stream->end_of_message())
+		{
+			dprintf(D_FULLDEBUG, "schedd_token_request: failed to send response ad to client.\n");
+			return false;
+		}
+		return true;
+	}
+
+	std::unique_ptr<DCSchedd> schedd(new DCSchedd(schedd_addr.c_str()));
+	std::unique_ptr<TokenRequestContinuation> continuation(new TokenRequestContinuation());
+	continuation->m_schedd = std::move(schedd);
+	continuation->m_peer_location = peer_location;
+
+	CondorError err;
+	if (!schedd->requestImpersonationToken(identity, authz_bounding_set, lifetime,
+		TokenRequestContinuation::finish, continuation.get(), err))
+	{
+		oqiwrjg
+	}
+}
  
 //----------------------------------------------------------------
 
@@ -261,6 +356,10 @@ void CollectorDaemon::Init()
 		// unmapped, and must match the Owner attribute).
 	daemonCore->Register_CommandWithPayload(UPDATE_OWN_SUBMITTOR_AD,"UPDATE_OWN_SUBMITTOR_AD",
 		(CommandHandler)receive_update,"receive_update",NULL,ALLOW);
+		// 
+	daemonCore->Register_CommandWithPayload(IMPERSONATION_TOKEN_REQUEST, "IMPERSONATION_TOKEN_REQUEST",
+		(CommandHandler)schedd_token_request, "schedd_token_request", nullptr, ALLOW,
+		D_COMMAND, true);
 
     // install command handlers for updates with acknowledgement
 
