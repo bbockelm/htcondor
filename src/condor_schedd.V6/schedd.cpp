@@ -943,11 +943,13 @@ bool
 Scheduler::SetupCollectorSession(unsigned duration, std::string &capability)
 {
 	if (!m_matchPasswordEnabled) {return false;}
-	m_collector_seq++;
+		// We reuse the negotiator sequence -- this way we don't have
+		// overlaps in the session names.
+	m_negotiator_seq++;
 
 	std::string id;
 	formatstr( id, "%s#%ld#%lu", daemonCore->publicNetworkIpAddr(),
-	           m_scheduler_startup, static_cast<long unsigned>(m_collector_seq));
+	           m_scheduler_startup, static_cast<long unsigned>(m_negotiator_seq));
 
 	const size_t keylen = 32;
 	auto keybuf = std::unique_ptr<char, decltype(free)*>{
@@ -958,11 +960,11 @@ Scheduler::SetupCollectorSession(unsigned duration, std::string &capability)
 		return false;
 	}
 
-	auto session_info = "[Encryption=\"YES\";Integrity=\"YES\";ValidCommands=\"416\"]";
+	auto session_info = "[Encryption=\"YES\";Integrity=\"YES\";ValidCommands=\"523\"]";
 	classad::ClassAd policy_ad;
 	policy_ad.InsertAttr("ScheddSession", true);
 	auto retval = daemonCore->getSecMan()->CreateNonNegotiatedSecuritySession(
-		NEGOTIATOR,
+		ALLOW,
 		id.c_str(),
 		keybuf.get(),
 		session_info,
@@ -14997,7 +14999,9 @@ Scheduler::handle_collector_token_request(int, Stream *stream)
 	}
 
 		// Check: is this the collector session?
-	if (static_cast<Sock*>(stream)->getFullyQualifiedUser() != COLLECTOR_SIDE_MATCHSESSION_FQU) {
+	if (strcmp(static_cast<Sock*>(stream)->getFullyQualifiedUser(),
+		COLLECTOR_SIDE_MATCHSESSION_FQU))
+	{
 		dprintf(D_ALWAYS, "Ignoring a collector token request from non-collector (%s).\n",
 			static_cast<Sock*>(stream)->getFullyQualifiedUser());
 		return false;
@@ -15034,13 +15038,14 @@ Scheduler::handle_collector_token_request(int, Stream *stream)
 	}
 
 	int requested_lifetime = -1;
-	if (ad.EvaluateAttrInt(ATTR_SEC_TOKEN_LIFETIME, requested_lifetime)) {
-		int max_lifetime = param_integer("SEC_ISSUED_TOKEN_EXPIRATION", -1);
-		if ((max_lifetime > 0) && (requested_lifetime > max_lifetime)) {
-			requested_lifetime = max_lifetime;
-		} else if ((max_lifetime > 0)  && (requested_lifetime < 0)) {
-			requested_lifetime = max_lifetime;
-		}
+	int max_lifetime = param_integer("SEC_ISSUED_TOKEN_EXPIRATION", -1);
+	if (!ad.EvaluateAttrInt(ATTR_SEC_TOKEN_LIFETIME, requested_lifetime)) {
+		requested_lifetime = -1;
+	}
+	if ((max_lifetime > 0) && (requested_lifetime > max_lifetime)) {
+		requested_lifetime = max_lifetime;
+	} else if ((max_lifetime > 0) && (requested_lifetime < 0)) {
+		requested_lifetime = max_lifetime;
 	}
 
 	classad::ClassAd result_ad;
@@ -15071,7 +15076,8 @@ Scheduler::handle_collector_token_request(int, Stream *stream)
 			result_ad.InsertAttr(ATTR_SEC_TOKEN, token);
 			dprintf(D_ALWAYS, "Collector %s token request for ID %s, bounding set %s,"
 				" and lifetime %d issued.\n", peer_location, requested_identity.c_str(),
-				bounding_set_str.c_str(), requested_lifetime);
+				bounding_set_str.empty() ? "(none)" : bounding_set_str.c_str(),
+				requested_lifetime);
 		}
 	}
 

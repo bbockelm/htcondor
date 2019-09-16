@@ -2226,7 +2226,7 @@ DCSchedd::requestImpersonationTokenAsync(const std::string &identity,
 		// The continuation object holds the state needed to make the request ad later.
 	auto continuation = new ImpersonationTokenContinuation(identity, authz_bounding_set,
 		lifetime, callback, misc_data);
-	auto result = startCommand_nonblocking(IMPERSONATION_TOKEN_REQUEST, Stream::reli_sock, 20, &err,
+	auto result = startCommand_nonblocking(COLLECTOR_TOKEN_REQUEST, Stream::reli_sock, 20, &err,
 		ImpersonationTokenContinuation::startCommandCallback, continuation,
 		"requestImpersonationToken");
 
