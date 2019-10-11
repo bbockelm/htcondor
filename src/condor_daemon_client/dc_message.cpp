@@ -125,6 +125,7 @@ DCMsg::cancelMessage(char const *reason)
 			// we now expect to be called via one of the message closure
 			// functions: callMessageSendFailed(), callMessageReceiveFailed()
 	}
+	doCallback();
 }
 
 void
@@ -251,6 +252,12 @@ DCMsg::sockFailed( Sock *sock )
 }
 
 
+std::string
+DCMsg::getDeliveryAddr() {
+	if (!m_messenger.get()) { return ""; }
+	return m_messenger->peerAddr();
+}
+
 DCMessenger::DCMessenger( classy_counted_ptr<Daemon> daemon )
 {
 	m_daemon = daemon;
@@ -288,6 +295,14 @@ char const *DCMessenger::peerDescription()
 	}
 	EXCEPT("No daemon or sock object in DCMessenger::peerDescription()");
 	return NULL;
+}
+
+std::string DCMessenger::peerAddr()
+{
+	if (m_daemon.get() && m_daemon->addr()) {
+		return m_daemon->addr();
+	}
+	return "";
 }
 
 void DCMessenger::startCommand( classy_counted_ptr<DCMsg> msg )

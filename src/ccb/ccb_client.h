@@ -71,6 +71,13 @@ class CCBClient: public Service, public ClassyCountedPtr {
 	MyString myName();
 	void DeadlineExpired();
 
+	// Manage the outstanding connections to any given CCB; queue connections over a given limit.
+	static constexpr int m_max_outstanding_connects = 20;
+	static std::unordered_map<std::string, unsigned> m_msg_inflight;
+	static std::unordered_map<std::string, std::vector<classy_counted_ptr<ClassAdMsg>>> m_msg_queue;
+	void sendMsg(const std::string &ccb_address, classy_counted_ptr<ClassAdMsg> msg);
+	void drainQueue(const std::string &ccb_address);
+
 	// CCB contact information should be an opaque token to everyone, but
 	// Sinful needs to be able parse CCB IDs to generate v1 addresses.
 	friend class Sinful;

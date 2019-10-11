@@ -229,6 +229,11 @@ public:
 		*/
 	virtual void cancelMessage(char const *reason=NULL);
 
+		/* Return where the message was to be sent; if unknown, an
+		 * empty value is returned.
+		 */
+	std::string getDeliveryAddr();
+
 	friend class DCMessenger;
 private:
 	int m_cmd;
@@ -321,6 +326,9 @@ public:
 
 		// Returns information about who we are talking to.
 	char const *peerDescription();
+
+		// Returns the addr of the peer we are talking to; empty if unknown.
+	std::string peerAddr();
 
 	friend class DCMsg;
 private:

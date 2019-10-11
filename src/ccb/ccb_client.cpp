@@ -29,12 +29,44 @@
 #include "condor_sinful.h"
 #include "shared_port_endpoint.h"
 
+std::unordered_map<std::string, unsigned> CCBClient::m_msg_inflight;
+std::unordered_map<std::string, std::vector<classy_counted_ptr<ClassAdMsg>>> CCBClient::m_msg_queue;
+
 static bool registered_reverse_connect_command = false;
 
 // hash of CCBClients waiting for a reverse connect command
 // indexed by connection id
 static HashTable< MyString,classy_counted_ptr<CCBClient> > waiting_for_reverse_connect(hashFunction);
 
+
+void
+CCBClient::drainQueue(const std::string &ccb_address)
+{
+	dprintf(D_FULLDEBUG, "CCB: Got message callback for %s\n", ccb_address.c_str());
+	auto iter = m_msg_queue.find(ccb_address);
+	if (iter == m_msg_queue.end()) {
+		dprintf(D_ALWAYS, "CCB: Got callback from unknown CCB address %s; "
+			"internal bug!\n", ccb_address.c_str());
+	} else if (iter->second.empty()) {
+		auto iter2 = m_msg_inflight.find(ccb_address);
+		if (iter2 ==  m_msg_inflight.end()) {
+			dprintf(D_ALWAYS, "CCB: Got in-flight callback from unknown "
+				"CCB address %s; internal bug!\n", ccb_address.c_str());
+		} else {
+			auto prev_value = --iter2->second;
+			dprintf(D_FULLDEBUG, "CCB: Remaining messages in flight were %d\n", prev_value);
+		}
+	} else {
+		auto msg = iter->second.back();
+		iter->second.pop_back();
+		dprintf(D_FULLDEBUG, "CCB: Sending queued CCB message; %d messages remain in queue.\n", iter->second.size()); 
+		classy_counted_ptr<Daemon> ccb_server = new Daemon(DT_COLLECTOR, ccb_address.c_str(),
+			nullptr);
+		ccb_server->sendMsg(msg.get());
+		// NOTE: count in m_msg_inflight is unchanged as we finished one message and started
+		// another.
+	}
+}
 
 
 CCBClient::CCBClient( char const *ccb_contact, ReliSock *target_sock ):
@@ -79,6 +111,25 @@ CCBClient::~CCBClient()
 	}
 }
 
+
+void
+CCBClient::sendMsg(const std::string &ccb_address, classy_counted_ptr<ClassAdMsg> msg)
+{
+	std::string alt_addr = "<" + ccb_address + ">";
+	auto iter = m_msg_inflight.insert({alt_addr, 0});
+	auto iter2 = m_msg_queue.insert({alt_addr, {}});
+	auto prev_value = ++iter.first->second;
+	dprintf(D_FULLDEBUG, "CCB: Starting send of message to %s; there were %d connects already in flight\n",
+		alt_addr.c_str(), prev_value);
+	if (prev_value > m_max_outstanding_connects) {
+		iter.first->second--;
+		iter2.first->second.push_back(msg);
+		dprintf(D_FULLDEBUG, "CCB: Queued CCB request; %lu messages in queue.\n", iter2.first->second.size());
+		return;
+	}
+	classy_counted_ptr<Daemon> ccb_server = new Daemon(DT_COLLECTOR, ccb_address.c_str(), nullptr);
+	ccb_server->sendMsg(msg.get());
+}
 
 bool
 CCBClient::ReverseConnect( CondorError *error, bool non_blocking )
@@ -606,7 +657,7 @@ CCBClient::try_next_ccb()
 		daemonCore->CallCommandHandler(CCB_REQUEST,server_sock);
 	}
 	else {
-		ccb_server->sendMsg(msg.get());
+		sendMsg(m_cur_ccb_address, msg.get());
 	}
 
 	// now wait for CCBResultsCallback and/or ReverseConnectCallback
@@ -631,8 +682,18 @@ CCBClient::CCBResultsCallback(DCMsgCallback *cb)
 	// waiting for the connection to show up.
 
 	ASSERT( cb );
+
+		// There is a result of some sort for this CCB - let's see if there
+		// are pending meessages to send out.
+	auto ccb_address = cb->getMessage()->getDeliveryAddr();
+	drainQueue(ccb_address);
+
+
 	m_ccb_cb = NULL;
-	if( cb->getMessage()->deliveryStatus() != DCMsg::DELIVERY_SUCCEEDED ) {
+	if (cb->getMessage()->deliveryStatus() == DCMsg::DELIVERY_CANCELED) {
+		dprintf(D_FULLDEBUG, "CCB: Delivery of success message cancelled.\n");
+		return;
+	} else if( cb->getMessage()->deliveryStatus() != DCMsg::DELIVERY_SUCCEEDED ) {
 		// We failed to communicate with the CCB server, so we should
 		// not expect to receive ReverseConnectCallback().
 		UnregisterReverseConnectCallback();
@@ -838,6 +899,10 @@ CCBClient::ReverseConnectCallback(Sock *sock)
 	if( m_ccb_cb ) {
 		// still haven't gotten the response from the CCB server.
 		// Don't care any longer, so cancel it.
+
+		auto ccb_address = m_ccb_cb->getMessage()->getDeliveryAddr();
+	        drainQueue(ccb_address);
+
 		m_ccb_cb->cancelCallback();
 		const bool quiet = true;
 		m_ccb_cb->cancelMessage( quiet );
