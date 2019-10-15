@@ -53,6 +53,7 @@
 #include <numeric>
 #include <unordered_set>
 #include <unordered_map>
+#include <string>
 
 namespace {
 
@@ -3616,6 +3617,61 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 					checksum = checksum_info.substr(sep + 1);
 				}
 				reuse_info.emplace_back("condor_exec.exe", checksum, checksum_type, tag, fileitem.fileSize());
+			}
+			if (jobAd.EvaluateAttrString("DataReuseManifestSHA256", checksum_info))
+			{
+				std::unique_ptr<FILE, decltype(&fclose)>
+					manifest(safe_fopen_wrapper_follow(checksum_info.c_str(), "r"),
+					fclose);
+				if (manifest.get()) {
+					int lineno = 0;
+					for (std::string line; readLine(line, manifest.get(), false);) {
+						lineno++;
+						if (!line[0] || line[0] == '#') {
+							continue;
+						}
+						StringList sl(line.c_str());
+						sl.rewind();
+						const char *cksum = sl.next();
+						if (cksum == nullptr) {
+							dprintf(D_ALWAYS, "DoUpload: Invalid manifest line: %s (line #%d)\n", line.c_str(), lineno);
+							continue;
+						}
+						const char *fname = sl.next();
+						if (fname == nullptr) {
+							dprintf(D_ALWAYS, "DoUpload: Invalid manifest file line (missing name): %s (line #%d)\n", line.c_str(), lineno);
+							continue;
+						}
+							// NOTE: manifest files output from sha256sum don't include a file size;
+							// requiring a size here is disappointing because that means the user can't
+							// use sha256sum directly.  Can be addressed in two ways:
+							//   - stat()'ing the file on the submit sided, then
+							//   - falling back to requiring this column (for URLs; we can't stat them).
+						const char *size_str = sl.next();
+						long long bytes_long;
+						if (size_str == nullptr) {
+							if (IsUrl(fname)) {
+								dprintf(D_ALWAYS, "DoUpload: Invalid manifest file line (missing size for URL): %s (line #%d)\n", line.c_str(), lineno);
+								continue;
+							}
+							struct stat statbuf;
+							if (-1 == stat(fname, &statbuf)) {
+								dprintf(D_ALWAYS, "DoUpload: Unable to get size of file %s in data manifest: %s (line #%d)\n", fname, strerror(errno), lineno);
+								continue;
+							}
+							bytes_long = statbuf.st_size;
+						} else {
+							try {
+								bytes_long = std::stoll(size_str);
+							} catch (...) {
+								dprintf(D_ALWAYS, "DoUpload: Invalid size in manifest file line: %s (line #%d)\n", line.c_str(), lineno);
+							}
+						}
+						reuse_info.emplace_back(fname, cksum, "sha256", tag, bytes_long);
+					}
+				} else {
+					dprintf(D_ALWAYS, "DoUpload: Failed to open SHA256 manifest %s: %s.\n", checksum_info.c_str(), strerror(errno));
+				}
 			}
 		}
 		const std::string &src_url = fileitem.srcName();
