@@ -2,6 +2,8 @@
 #include "condor_classad.h"
 #include "../condor_utils/file_transfer_stats.h"
 #include "../condor_utils/condor_url.h"
+#include "directory.h"
+#include "AWSv4-utils.h"
 #include "multifile_curl_plugin.h"
 #include "utc_time.h"
 #include <exception>
@@ -13,6 +15,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <rapidjson/document.h>
+#include "tinyxml2.h"
 
 #define MAX_RETRY_ATTEMPTS 20
 
@@ -87,6 +90,17 @@ CurlWriteCallback(char *buffer, size_t size, size_t nitems, void *userdata) {
         return size*nitems;
     }
     return fwrite(buffer, size, nitems, static_cast<FILE*>(userdata));
+}
+
+extern "C"
+size_t
+CurlWriteBufferCallback(char *buffer, size_t size, size_t nitems, void *userdata) {
+    if (userdata == nullptr) {return 0;}
+
+    std::string &str_buffer = *static_cast<std::string*>(userdata);
+    str_buffer += std::string(buffer, size*nitems);
+
+    return size*nitems;
 }
 
 void
@@ -847,7 +861,6 @@ MultiFileCurlPlugin::InitializeStats( std::string request_url ) {
 
 size_t
 MultiFileCurlPlugin::HeaderCallback( char* buffer, size_t size, size_t nitems, void *userdata ) {
-    fprintf(stderr, "[MultiFileCurlPlugin::HeaderCallback] called\n");
     auto ft_stats = static_cast<FileTransferStats*>(userdata);
 
     const char* delimiters = " \r\n";
@@ -907,30 +920,277 @@ MultiFileCurlPlugin::ParseAds() {
 
     int error;
     bool is_eof;
-    classad::ClassAd job_ad;
-    if (InsertFromFile(fp.get(), job_ad, is_eof, error) < 0) {
+    m_job_ad.reset(new classad::ClassAd());
+    if (InsertFromFile(fp.get(), *m_job_ad, is_eof, error) < 0) {
         return;
     }
 
-    classad::ClassAd machine_ad;
+    m_machine_ad.reset(new classad::ClassAd());
     if (machine_ad_env) {
         fp.reset(safe_fopen_wrapper(machine_ad_env, "r"));
         if (fp) {
                 // Note we ignore errors; failure to parse machine ad
                 // is not fatal.
-            InsertFromFile(fp.get(), machine_ad, is_eof, error);
+            InsertFromFile(fp.get(), *m_machine_ad, is_eof, error);
         }
     }
 
-    job_ad.ChainToAd(&machine_ad);
+    m_job_ad->ChainToAd(m_machine_ad.get());
 
     int speed_limit;
-    if (job_ad.EvaluateAttrInt("LowSpeedLimit", speed_limit)) {
+    if (m_job_ad->EvaluateAttrInt("LowSpeedLimit", speed_limit)) {
         m_speed_limit = speed_limit;
     }
     int speed_time;
-    if (job_ad.EvaluateAttrInt("LowSpeedTime", speed_time)) {
+    if (m_job_ad->EvaluateAttrInt("LowSpeedTime", speed_time)) {
         m_speed_time = speed_time;
+    }
+}
+
+
+namespace {
+
+TransferPluginResult emitErrorAd(const std::string &msg)
+{
+    classad::ClassAd ad;
+    if (!ad.InsertAttr(ATTR_ERROR_STRING, msg)) {
+        return TransferPluginResult::Error;
+    }
+
+    classad::ClassAdUnParser printer;
+    printer.SetOldClassAd(false);
+    std::string buffer;
+    printer.Unparse(buffer, &ad);
+    if (!buffer.empty()) {
+        printf("%s\n", buffer.c_str());
+    }
+
+    return TransferPluginResult::Error;
+}
+
+
+bool
+emitListing(const std::string &url)
+{
+    classad::ClassAd ad;
+    if (!ad.InsertAttr("URL", url)) {
+        emitErrorAd("Failed to create listing message (memory allocation error?)");
+        return false;
+    }
+    classad::ClassAdUnParser printer;
+    printer.SetOldClassAd(false);
+    std::string buffer;
+    printer.Unparse(buffer, &ad);
+    if (buffer.empty()) {
+        emitErrorAd("Failed to print result ClassAd to string");
+        return false;
+    }
+    printf("%s\n", buffer.c_str());
+    return true;
+}
+
+
+TransferPluginResult
+ListFileURL(const std::string &listing_url)
+{
+    auto path = listing_url.substr(strlen("file:/"));
+    StatInfo info(path.c_str());
+    if (info.Error()) {
+        std::string errmsg = std::string("Failed to stat directory: ") + strerror(info.Errno());
+        return emitErrorAd(errmsg);
+    }
+    Directory dir(path.c_str());
+    dir.Rewind();
+    const char *entry;
+    while ( (entry = dir.Next()) ) {
+        if (!emitListing(listing_url + DIR_DELIM_CHAR + entry)) {
+            return TransferPluginResult::Error;
+        }
+    }
+    return TransferPluginResult::Success;
+}
+
+}
+
+
+bool
+MultiFileCurlPlugin::DownloadBuffer( const std::string &url, std::string &buffer, CondorError &err ) {
+
+    struct curl_slist *header_list = NULL;
+    try {
+        InitializeCurlHandle( url, "", header_list );
+    } catch (const std::exception &exc) {
+        err.push("DownloadBuffer", 1, exc.what());
+        return false;
+    }
+
+    // Libcurl options that apply to all transfer protocols
+    CURLcode r;
+        // Disable header parsing; we don't need this as we don't collect stats.
+    r = curl_easy_setopt( _handle, CURLOPT_HEADERFUNCTION, &HeaderCallback );
+    if (r != CURLE_OK) {
+            err.push("DownloadBuffer", 2, "Can't setopt HEADERFUNCTION");
+            return false;
+    }
+    r = curl_easy_setopt( _handle, CURLOPT_WRITEDATA, &buffer );
+    if (r != CURLE_OK) {
+        err.push("DownloadBuffer", 3, "Can't setopt CURLOPT_WRITEDATA");
+        return false;
+    }
+        // We don't use the standard callback function as we append to the buffer.
+    r = curl_easy_setopt( _handle, CURLOPT_WRITEFUNCTION, &CurlWriteBufferCallback );
+    if (r != CURLE_OK) {
+        err.push("DownloadBuffer", 4, "Can't setopt WRITEFUNCTION");
+        return false;
+    }
+
+    if (header_list) {
+        r = curl_easy_setopt(_handle, CURLOPT_HTTPHEADER, header_list);
+        if (r != CURLE_OK) {
+            err.push("DownloadBuffer", 5, "Can't setopt CURLOPT_HTTPHEADER");
+            return false;
+        }
+    }
+
+    // Perform the curl request
+    auto rval = curl_easy_perform( _handle );
+
+    if (header_list) curl_slist_free_all(header_list);
+
+    // See note about this logic in DownloadFile
+    char* redirect_url;
+    long return_code;
+    curl_easy_getinfo( _handle, CURLINFO_REDIRECT_URL, &redirect_url );
+    curl_easy_getinfo( _handle, CURLINFO_RESPONSE_CODE, &return_code );
+    if( ( return_code == 301 || return_code == 302 ) && !redirect_url ) {
+        // Hack: set rval to a non-zero CURL error code
+        rval = CURLE_REMOTE_FILE_NOT_FOUND;
+        err.push("DownloadBuffer", 6, "The URL you requested could not be found.");
+    }
+
+        // Error handling and cleanup
+    if (_diagnostic && rval) {
+        err.pushf("DownloadBuffer", -rval, "Download failed: %s\n",
+                curl_easy_strerror(rval));
+    }
+
+    return rval ? false : true;
+}
+
+
+TransferPluginResult
+MultiFileCurlPlugin::ListS3URL(const std::string &listing_url)
+{
+    CondorError err;
+    if (!m_job_ad) {m_job_ad.reset(new classad::ClassAd());}
+
+    std::string host, input_region, region, bucket, key, canonicalURI;
+    m_job_ad->EvaluateAttrString(ATTR_AWS_REGION, input_region);
+
+    if (!AWSv4Impl::parseS3URL(listing_url, input_region, host, region, bucket, key, canonicalURI, err)) {
+        if (!err.empty()) {
+            return emitErrorAd(err.message());
+        } else {
+            return emitErrorAd("Unable to parse S3 URL");
+        }
+    }
+    std::string input_url = std::string("s3://") + host + "/";
+        // In this case, we aren't using DNS-style AWS bucket names; add the bucket to the URL
+    std::string dns_prefix = bucket + ".";
+    if (!((host.substr(0, dns_prefix.size()) == dns_prefix) &&
+          (host.size() > 14) && (host.substr(host.size() - 14) == ".amazonaws.com"))) {
+        input_url += bucket;
+    }
+    //printf("Input URL: %s\n", input_url.c_str());
+
+    std::string presignedURL;
+    std::map<std::string, std::string> query;
+    query["list-type"] = "2";
+    if (!key.empty()) {
+        query["prefix"] = key;
+    }
+    if (!htcondor::generate_presigned_url(*m_job_ad, input_url, "GET", query, presignedURL, err)) {
+        if (!err.empty()) {
+            return emitErrorAd(err.message());
+        } else {
+            return emitErrorAd("Failed to sign S3 URL");
+        }
+    }
+    //printf("Presigned URL: %s\n", presignedURL.c_str());
+
+    while (true) {
+        std::string buffer;
+        if (!DownloadBuffer(presignedURL, buffer, err)) {
+            return emitErrorAd(err.message());
+        }
+
+        using namespace tinyxml2;
+        XMLDocument doc;
+        auto xerr = doc.Parse(buffer.c_str());
+        if (xerr) {
+            return emitErrorAd(doc.ErrorStr());
+        }
+
+        auto root = doc.FirstChildElement("ListBucketResult");
+        if (!root) {
+            return emitErrorAd("Response missing ListBucketResult");
+        }
+
+        std::string result_prefix = input_url;
+        if (result_prefix[result_prefix.size()-1] != '/') {result_prefix += '/';}
+        auto contents = root->FirstChildElement("Contents");
+        while (contents) {
+            auto key_elem = contents->FirstChildElement("Key");
+            if (!key_elem) {
+                return emitErrorAd("Missing Key inside result contents");
+            }
+            auto keyname = key_elem->GetText();
+            if (!keyname || !*keyname) {
+                return emitErrorAd("Key does not contain any text");
+            }
+            emitListing(result_prefix + keyname);
+
+            contents = contents->NextSiblingElement("Contents");
+        }
+
+        auto truncated_elem = root->FirstChildElement("IsTruncated");
+        if (!truncated_elem) {
+            break;
+        }
+        bool is_truncated;
+        if (truncated_elem->QueryBoolText(&is_truncated) || !is_truncated) break;
+
+        auto cont_elem = root->FirstChildElement("NextContinuationToken");
+        if (!cont_elem) {break;}
+        auto token_char = cont_elem->GetText();
+        if (!token_char) break;
+
+        query["continuation-token"] = token_char;
+        if (!htcondor::generate_presigned_url(*m_job_ad, input_url, "GET", query, presignedURL, err)) {
+            if (!err.empty()) {
+                return emitErrorAd(err.message());
+            } else {
+                return emitErrorAd("Failed to sign S3 URL");
+            }
+        }
+        printf("Presigned URL: %s\n", presignedURL.c_str());
+
+    }
+ 
+    return TransferPluginResult::Success;
+}
+
+
+TransferPluginResult
+MultiFileCurlPlugin::ListURL(const std::string &listing_url)
+{
+    auto method = getURLType(listing_url.c_str(), true);
+    if (method == "s3") {
+        return ListS3URL(listing_url);
+    } else if (method == "file") {
+        return ListFileURL(listing_url);
+    } else {
+        return emitErrorAd("Only file:// or s3:// is supported for directory listing.");
     }
 }
 
@@ -942,19 +1202,22 @@ main( int argc, char **argv ) {
     FILE* output_file;
     bool diagnostic = false;
     bool upload = false;
+    bool listing = false;
     TransferPluginResult result;
     std::string input_filename;
     std::string output_filename;
     std::string transfer_files;
+    std::string listing_url;
 
     // Check if this is a -classad request
     if ( argc == 2 ) {
         if ( strcmp( argv[1], "-classad" ) == 0 ) {
             printf( "%s",
                 "MultipleFileSupport = true\n"
+                "ListingSupport = true\n"
                 "PluginVersion = \"0.2\"\n"
                 "PluginType = \"FileTransfer\"\n"
-                "SupportedMethods = \"http,https,ftp,file,dav,davs\"\n"
+                "SupportedMethods = \"http,https,ftp,file,dav,davs,s3\"\n"
             );
             return (int)TransferPluginResult::Success;
         }
@@ -962,6 +1225,16 @@ main( int argc, char **argv ) {
     // If not, iterate over command-line arguments and set variables appropriately
     else {
         for( int i = 1; i < argc; i ++ ) {
+            if ( strcmp( argv[i], "-list" ) == 0 ) {
+                if ( i < ( argc - 1 ) ) {
+                    listing_url = argv[i+1];
+                    listing = true;
+                }
+                else {
+                    fprintf(stderr, "Error: `-list` option requires a URL for listing.\n");
+                    valid_inputs = false;
+                }
+            }
             if ( strcmp( argv[i], "-infile" ) == 0 ) {
                 if ( i < ( argc - 1 ) ) {
                     input_filename = argv[i+1];
@@ -987,7 +1260,7 @@ main( int argc, char **argv ) {
         }
     }
 
-    if ( !valid_inputs || input_filename.empty() ) {
+    if ( !valid_inputs || (input_filename.empty() && !listing) ) {
         fprintf( stderr, "Error: invalid arguments\n" );
         fprintf( stderr, "Usage: %s -infile <input-filename> -outfile <output-filename> [general-opts]\n\n", argv[0] );
         fprintf( stderr, "[general-opts] are:\n" );
@@ -1001,6 +1274,11 @@ main( int argc, char **argv ) {
     if( curl_plugin.InitializeCurl() != 0 ) {
         fprintf( stderr, "ERROR: curl_plugin failed to initialize. Aborting.\n" );
         return (int)TransferPluginResult::Error;
+    }
+
+    if (listing) {
+        result = curl_plugin.ListURL(listing_url);
+        return static_cast<int>(result);
     }
 
     // Do the transfer(s)

@@ -49,6 +49,7 @@
 #include "AWSv4-utils.h"
 #include "condor_random_num.h"
 #include "condor_sys.h"
+#include "condor_mkstemp.h"
 
 #include <fstream>
 #include <algorithm>
@@ -300,7 +301,6 @@ FileTransfer::~FileTransfer()
 	if (perm_obj) delete perm_obj;
 #endif
 	free(m_sec_session_id);
-	delete plugin_table;
 }
 
 int
@@ -692,7 +692,7 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 
 	CondorError e;
 	I_support_filetransfer_plugins = false;
-	plugin_table = NULL;
+	plugin_table.reset();
 	InitializePlugins(e);
 	if (allow_inline_plugins) {
 		InitializeJobPlugins(*Ad, e, *InputFiles);
@@ -2610,8 +2610,9 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 							if (has_good_prefix) {
 								dprintf(D_FULLDEBUG, "DoDownload: URL will be signed: %s.\n", url_value.c_str());
 								std::string signed_url;
+								std::map<std::string, std::string> query_params;
 								CondorError err;
-								if (!htcondor::generate_presigned_url(jobAd, url_value, "PUT", signed_url, err)) {
+								if (!htcondor::generate_presigned_url(jobAd, url_value, "PUT", query_params, signed_url, err)) {
 								    std::string errorMessage;
 								    formatstr( errorMessage, "DoDownload: Failure when signing URL '%s': %s", url_value.c_str(), err.message() );
 								    result_ad.Assign( ATTR_HOLD_REASON_CODE, CONDOR_HOLD_CODE_DownloadFileError );
@@ -2678,8 +2679,9 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 				// file transfer.
 				MyString pluginPath = DetermineFileTransferPlugin( errstack, URL.Value(), fullname.Value() );
 				bool thisPluginSupportsMultifile = false;
-				if( plugins_multifile_support.find( pluginPath ) != plugins_multifile_support.end() ) {
-					thisPluginSupportsMultifile = plugins_multifile_support[pluginPath];
+				auto features = plugins_features.find(pluginPath);
+				if (features != plugins_features.end()) {
+					thisPluginSupportsMultifile = features->second.multifile;
 				}
 
 				if( thisPluginSupportsMultifile ) {
@@ -3826,7 +3828,8 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			dprintf(D_FULLDEBUG, "DoUpload: Will sign %s for remote transfer.\n", src_url.c_str());
 			std::string signed_url;
 			CondorError err;
-			if (htcondor::generate_presigned_url(jobAd, src_url, "GET", signed_url, err)) {
+			std::map<std::string, std::string> query_params;
+			if (htcondor::generate_presigned_url(jobAd, src_url, "GET", query_params, signed_url, err)) {
 				fileitem.setSrcName(signed_url);
 			} else {
 				std::string errorMessage;
@@ -4193,8 +4196,9 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 
 			if (multifile_plugins_enabled) {
 				std::string pluginPath = DetermineFileTransferPlugin( errstack, fileitem.destUrl().c_str(), fullname.c_str() );
-				if ( (plugins_multifile_support.find( pluginPath ) != plugins_multifile_support.end()) && \
-				plugins_multifile_support[pluginPath] ) {
+				auto features = plugins_features.find(pluginPath);
+				if ((features != plugins_features.end()) && features->second.multifile)
+				{
 					multifilePluginPath = pluginPath;
 				}
 			}
@@ -5472,9 +5476,131 @@ MyString FileTransfer::DetermineFileTransferPlugin( CondorError &error, const ch
 
 
 TransferPluginResult
+FileTransfer::InvokeListingPlugin(const std::string &url,
+	std::vector<std::string> &results, CondorError &err)
+{
+	if (!plugin_table) {
+		dprintf(D_FULLDEBUG, "FILETRANSFER: URL plugins are not configured! (request was %s)\n", 
+			url.c_str());
+		err.pushf("FILETRANSFER", 1, "URL plugins are not configured (request was %s)", url.c_str());
+		return TransferPluginResult::Error;
+	}
+
+	auto method = getURLType(url.c_str(), true);
+	if (method.empty()) {
+		err.pushf("FILETRANSFER", 2, "Requested listing location (%s) was not a URL", url.c_str());
+		dprintf(D_FULLDEBUG, "FILETRANSFER: Requested listing location (%s) was not a URL\n", url.c_str());
+		return TransferPluginResult::Error;
+	}
+        MyString plugin_path_mystr;
+	if (plugin_table->lookup(method.c_str(), plugin_path_mystr)) {
+		err.pushf("FILETRANSFER", 3, "Plugin for type %s not found!", method.c_str());
+		dprintf(D_FULLDEBUG, "FILETRANSFER: plugin for type %s not found!\n", method.c_str());
+		return TransferPluginResult::Error;
+	}
+	auto features = plugins_features.find(plugin_path_mystr.c_str());
+	if (features == plugins_features.end() || !features->second.listing) {
+		err.pushf("FILETRANSFER", 4, "Plugin for %s does not support file listing", method.c_str());
+		dprintf(D_FULLDEBUG, "FILETRANSFER: plugin for %s does not support file listing\n", method.c_str());
+		return TransferPluginResult::Error;
+	}
+
+	// prepare environment for the plugin
+	Env plugin_env;
+	plugin_env.Import();
+
+	std::string job_temp;
+	if (jobAd.size()) {
+		std::vector<char> job_char; job_char.reserve(19);
+		strcpy(&job_char[0], "/tmp/job_ad.XXXXXX");
+		int fd = condor_mkstemp(&job_char[0]);
+		if (-1 == fd) {
+			err.pushf("FILETRANSFER", -errno, "Failed to create temporary job ad: %s", strerror(errno));
+			return TransferPluginResult::Error;
+		}
+		classad::ClassAdUnParser printer;
+		printer.SetOldClassAd(true);
+		std::string buffer;
+		printer.Unparse(buffer, &jobAd);
+		auto bytes = full_write(fd, buffer.c_str(), buffer.size());
+		if (bytes != static_cast<ssize_t>(buffer.size())) {
+			err.pushf("FILETRANSFER", -errno, "Failed to write job ad: %s", strerror(errno));
+			unlink(job_temp.c_str());
+			return TransferPluginResult::Error;
+		}
+
+		job_temp = &job_char[0];
+		plugin_env.SetEnv( "_CONDOR_JOB_AD", job_temp.c_str() );
+	}
+
+	// prepare args for the plugin
+	ArgList plugin_args;
+	plugin_args.AppendArg(plugin_path_mystr);
+	plugin_args.AppendArg("-list");
+	plugin_args.AppendArg(url);
+	dprintf(D_FULLDEBUG, "FileTransfer::InvokeListingPlugin invoking: %s -list %s\n",
+		plugin_path_mystr.Value(), url.c_str());
+
+	// determine if we want to run the plugin with root priv (if available).
+	// if so, drop_privs should be false.  the default is to drop privs.
+	bool drop_privs = !param_boolean("RUN_FILETRANSFER_PLUGINS_WITH_ROOT", false);
+
+		// Invoke the plugin
+	FILE* plugin_pipe = my_popen(plugin_args, "r", FALSE, &plugin_env, drop_privs);
+
+	classad::ClassAdParser parser;
+	parser.SetOldClassAd(false);
+	std::string error_message;
+	while (!ferror(plugin_pipe) && !feof(plugin_pipe)) {
+		classad::ClassAd *ad = parser.ParseClassAd(plugin_pipe, false);
+		std::unique_ptr<classad::ClassAd> ad_guard(ad);
+		if (!ad) {
+			break;
+/*
+			err.pushf("FILETRANSFER", 5, "Failed to parse result ad from the listing plugin");
+			dprintf(D_FULLDEBUG, "FILETRANSFER: Failed to parse result ad from the listing plugin");
+			unlink(job_temp.c_str());
+			return TransferPluginResult::Error;
+*/
+		}
+		if (ad->EvaluateAttrString(ATTR_ERROR_STRING, error_message)) {
+			break;
+		}
+		std::string resource;
+		if (!ad->EvaluateAttrString("URL", resource)) {
+			err.pushf("FILETRANSFER", 6, "Listing plugin result ad did not have a URL string");
+			dprintf(D_FULLDEBUG, "FILETRANSFER: Listing plugin result ad did not have a URL string\n");
+			unlink(job_temp.c_str());
+			return TransferPluginResult::Error;
+		}
+		results.emplace_back(resource);
+	}
+
+		// Close the plugin
+	int rc = my_pclose(plugin_pipe);
+	int exit_status = WEXITSTATUS(rc);
+	TransferPluginResult result = static_cast<TransferPluginResult>(exit_status);
+	unlink(job_temp.c_str());
+
+	if (result != TransferPluginResult::Success) {
+		dprintf(D_ALWAYS, "FILETRANSFER: Listing plugin %s returned %i\n", plugin_path_mystr.Value(),
+			exit_status);
+		err.pushf("FILETRANSFER", 7, "non-zero exit (%i) from %s. Error: %s (%s)",
+			rc, plugin_path_mystr.Value(), error_message.c_str(), url.c_str());
+		return TransferPluginResult::Error;
+	} else {
+		dprintf(D_FULLDEBUG, "FILETRANSFER: Listing plugin %s returned success.\n",
+			plugin_path_mystr.Value());
+	}
+
+	return result;
+}
+
+
+TransferPluginResult
 FileTransfer::InvokeFileTransferPlugin(CondorError &e, const char* source, const char* dest, ClassAd* plugin_stats, const char* proxy_filename) {
 
-	if (plugin_table == NULL) {
+	if (!plugin_table) {
 		dprintf(D_FULLDEBUG, "FILETRANSFER: No plugin table defined! (request was %s)\n", source);
 		e.pushf("FILETRANSFER", 1, "No plugin table defined (request was %s)", source);
 		return TransferPluginResult::Error;
@@ -5628,7 +5754,7 @@ FileTransfer::InvokeMultipleFileTransferPlugin( CondorError &e,
 	std::string output_filename;
 	std::string plugin_name;
 
-	if ( plugin_table == NULL ) {
+	if (!plugin_table) {
 		dprintf( D_FULLDEBUG, "FILETRANSFER: No plugin table defined! "
 				"(requesting multi-file transfer)\n" );
 		e.pushf( "FILETRANSFER", 1, "No plugin table defined (requesting "
@@ -5664,7 +5790,8 @@ FileTransfer::InvokeMultipleFileTransferPlugin( CondorError &e,
 	// Determine if we want to run the plugin with root priv (if available).
 	// If so, drop_privs should be false.  the default is to drop privs.
 	bool drop_privs = !param_boolean( "RUN_FILETRANSFER_PLUGINS_WITH_ROOT", false );
-	if (plugins_from_job.find(plugin_path) != plugins_from_job.end()) { drop_privs = true; }
+	auto features = plugins_features.find(plugin_path);
+	if ((features != plugins_features.end()) && features->second.from_job) { drop_privs = true; }
 
 	// Lookup the initial working directory
 	std::string iwd;
@@ -5894,8 +6021,9 @@ int FileTransfer::InitializeJobPlugins(const ClassAd &job, CondorError &e, Strin
 			MyString plugin(condor_basename(plugin_path.c_str()));
 
 			InsertPluginMappings(methods, plugin);
-			plugins_multifile_support[plugin] = true;
-			plugins_from_job[plugin.c_str()] = true;
+			auto iter = plugins_features.insert({plugin, PluginFeatures()});
+			iter.first->second.multifile = true;
+			iter.first->second.from_job= true;
 			multifile_plugins_enabled = true;
 			// add the plugin to the transfer list
 		} else {
@@ -5928,7 +6056,7 @@ int FileTransfer::InitializePlugins(CondorError &e) {
 	}
 
 	// plugin_table is a member variable
-	plugin_table = new PluginHashTable(hashFunction);
+	plugin_table.reset(new PluginHashTable(hashFunction));
 
 	StringList plugin_list (plugin_list_string);
 	plugin_list.rewind();
@@ -6008,8 +6136,16 @@ FileTransfer::SetPluginMappings( CondorError &e, const char* path )
 	// extract the info we care about
 	char* methods = NULL;
 	bool this_plugin_supports_multifile = false;
-	if ( ad->LookupBool( "MultipleFileSupport", this_plugin_supports_multifile ) ) {
-		plugins_multifile_support[path] = this_plugin_supports_multifile;
+	auto features = plugins_features.insert({path, PluginFeatures()});
+	if (ad->LookupBool("MultipleFileSupport", this_plugin_supports_multifile)) {
+		features.first->second.multifile = this_plugin_supports_multifile;
+	}
+	bool plugin_feature_bool = false;
+	if (ad->LookupBool("FilesizeSupport", plugin_feature_bool)) {
+		features.first->second.filesize = plugin_feature_bool;
+	}
+	if (ad->LookupBool("ListingSupport", plugin_feature_bool)) {
+		features.first->second.listing = plugin_feature_bool;
 	}
 
 	// Before adding mappings, make sure that if multifile plugins are disabled,

@@ -1041,7 +1041,7 @@ int MacroStreamXFormSource::parse_iterate_args(char * pargs, int expand_options,
 		} else if (oa.foreach_mode == foreach_matching_any) {
 			expand_options &= ~(EXPAND_GLOBS_TO_FILES|EXPAND_GLOBS_TO_DIRS);
 		}
-		citems = submit_expand_globs(oa.items, expand_options, errmsg);
+		citems = submit_expand_globs(oa.items, expand_options, nullptr, errmsg);
 		if ( ! errmsg.empty()) {
 			fprintf(stderr, "\n%s: %s", citems >= 0 ? "WARNING" : "ERROR", errmsg.c_str());
 			errmsg.clear();

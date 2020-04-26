@@ -1,18 +1,10 @@
 #ifndef AWSV4_UTILS_H
 #define AWSV4_UTILS_H
 
-/*
- * This header requires the following headers.
- *
 #include <string>
 #include <map>
 
-#include <openssl/hmac.h>
-
-#include "classad.h"
-#include "CondorError.h"
- *
- */
+class CondorError;
 
 namespace htcondor {
 //
@@ -23,6 +15,7 @@ bool
 generate_presigned_url( const classad::ClassAd & jobAd,
 	const std::string & s3url,
 	const std::string & verb,
+        const std::map<std::string, std::string> & query_parameters,
 	std::string & presignedURL,
 	CondorError & err );
 }
@@ -56,6 +49,11 @@ createSignature( const std::string & secretAccessKey,
     const std::string & date, const std::string & region,
     const std::string & service, const std::string & stringToSign,
     std::string & signature );
+
+bool
+parseS3URL(const std::string &url, const std::string &input_region,
+     std::string &host, std::string &region, std::string &bucket,
+     std::string &key, std::string &canonicalURI, CondorError &err);
 
 }
 

@@ -224,31 +224,15 @@ isPathStyleBucket( const std::string & bucket ) {
 }
 
 bool
-generate_presigned_url( const std::string & accessKeyID,
-  const std::string & secretAccessKey,
-  const std::string & securityToken,
-  const std::string & s3url,
-  const std::string & input_region,
-  const std::string & verb,
-  std::string & presignedURL,
-  CondorError & err ) {
-
-    time_t now; time( & now );
-    // Allow for modest clock skews.
-    now -= 5;
-    struct tm brokenDownTime; gmtime_r( & now, & brokenDownTime );
-    char dateAndTime[] = "YYYYMMDDThhmmssZ";
-    strftime( dateAndTime, sizeof(dateAndTime), "%Y%m%dT%H%M%SZ",
-        & brokenDownTime );
-    char date[] = "YYYYMMDD";
-    strftime( date, sizeof(date), "%Y%m%d", & brokenDownTime );
-
+AWSv4Impl::parseS3URL(const std::string &s3url, const std::string &input_region,
+    std::string &host, std::string &region, std::string &bucket,
+    std::string &key, std::string &canonicalURI, CondorError &err)
+{
     // If the named bucket isn't valid as part of a DNS name,
     // we assume it's an old "path-style"-only bucket.
-    std::string canonicalURI( "/" );
+    canonicalURI = "/";
 
     // Extract the S3 bucket and key from the S3 URL.
-    std::string bucket, key;
     if(! starts_with( s3url, "s3://" )) {
         err.push( "AWS SigV4", 1, "an S3 URL must begin with s3://" );
         return false;
@@ -260,7 +244,8 @@ generate_presigned_url( const std::string & accessKeyID,
             "s3://<bucket>.s3.<region>.amazonaws.com/<object>, or s3://.../... for non-AWS endpoints" );
         return false;
     }
-    std::string region = input_region;
+    key = s3url.substr( middle + 1 );
+    region = input_region;
     auto bucket_or_hostname = s3url.substr( protocolLength, middle - protocolLength );
     // Strip out the port number for now in order to simplify logic below.
     auto port_idx = bucket_or_hostname.find(":");
@@ -270,7 +255,7 @@ generate_presigned_url( const std::string & accessKeyID,
         bucket_or_hostname = bucket_or_hostname.substr(0, port_idx);
     }
     // URLs of the form s3://<bucket>/<key>
-    std::string host = bucket_or_hostname;
+    host = bucket_or_hostname;
     if (bucket_or_hostname.find(".") == std::string::npos) {
         bucket = bucket_or_hostname;
         if(! region.empty()) {
@@ -287,38 +272,106 @@ generate_presigned_url( const std::string & accessKeyID,
                   AWSv4Impl::pathEncode(bucket).c_str() );
             }
         }
+        formatstr_cat( canonicalURI, "%s", AWSv4Impl::pathEncode(key).c_str() );
     // URLs of the form s3://<bucket>.s3.<region>.amazonaws.com/<object>
     } else if (bucket_or_hostname.substr(bucket_or_hostname.size() - 14) == ".amazonaws.com") {
         auto bucket_and_region = bucket_or_hostname.substr(0, bucket_or_hostname.size() - 14);
         auto last_idx = bucket_and_region.rfind(".s3.");
+        formatstr_cat( canonicalURI, "%s", AWSv4Impl::pathEncode(key).c_str() );
         if (last_idx == std::string::npos) {
-            err.push( "AWS SigV4", 3, "invalid format for domain-based buckets; must be of the"
-                " form s3://<bucket>.s3.<region>.amazonaws.com/<object>" );
-            return false;
+            printf("%s\n", bucket_and_region.c_str());
+            if (bucket_and_region == "s3") {
+                // Format: s3://s3.amazonaws.com/chtc_testing
+                region = "us-east-1";
+                auto bucket_start = key.find_first_not_of("/", 0);
+                auto bucket_end = key.find("/", bucket_start);
+                if (bucket_start == std::string::npos) {
+                    err.push( "AWS SigV4", 3, "s3://s3.amazonaws.com is not a valid S3 URL");
+                    return false;
+                }
+                bucket = key.substr(bucket_start, bucket_end - bucket_start);
+                key = key.substr(bucket_end + 1);
+            } else if ((bucket_and_region.substr(bucket_and_region.size() - 3) == ".s3") && (bucket_and_region.find(".") == bucket_and_region.size() - 3)) {
+                bucket = bucket_and_region.substr(bucket_and_region.find("."));
+                region = "us-east-1";
+            } else {
+                err.push( "AWS SigV4", 3, "invalid format for domain-based buckets; must be of the"
+                    " form s3://<bucket>.s3.<region>.amazonaws.com/<object>" );
+                return false;
+            }
+        } else {
+            bucket = bucket_and_region.substr(0, last_idx);
+            region = bucket_and_region.substr(last_idx + 4);
         }
-        bucket = bucket_and_region.substr(0, last_idx);
-        region = bucket_and_region.substr(last_idx + 4);
     } else {
-        // All other URLs were s3://<something-without-dots>/<something>
+        // All other URLs were s3://<something-with-dots>/<something>
         // where the first part is now in 'host' and the second part
-        // will be in 'key' at the end of this stanza.
+        // will be of the form '/bucket/key'
+        auto bucket_start = key.find_first_not_of("/", 0);
+        if (bucket_start == std::string::npos) {
+            bucket = key;
+            key = "";
+        } else {
+            auto bucket_end = key.find("/", bucket_start + 1);
+            bucket = key.substr(bucket_start, bucket_end - bucket_start);
+            if (bucket_end == std::string::npos) {
+                key = "";
+            } else {
+                auto key_start = bucket_end + 1;
+                if (key_start == std::string::npos) {
+                    key = "";
+                } else {
+                    key = key.substr(key_start);
+                }
+            }
+        }
+        if (!bucket.empty()) {
+            formatstr_cat( canonicalURI, "%s", AWSv4Impl::pathEncode(bucket).c_str() );
+            if (!key.empty()) 
+                formatstr_cat( canonicalURI, "/%s", AWSv4Impl::pathEncode(key).c_str() );
+        }
     }
     if (!port_number.empty()) {
         host = host + ":" + port_number;
     }
-    key = s3url.substr( middle + 1 );
     // Pick a default region.
     if (region.empty()) {
         region = "us-east-1";
+    }
+ 
+    return true;
+}
+
+
+bool
+generate_presigned_url( const std::string & accessKeyID,
+  const std::string & secretAccessKey,
+  const std::string & securityToken,
+  const std::string & s3url,
+  const std::string & input_region,
+  const std::string & verb,
+  const std::map< std::string, std::string > & query_parameters,
+  std::string & presignedURL,
+  CondorError & err )
+{
+    time_t now; time( & now );
+    // Allow for modest clock skews.
+    now -= 5;
+    struct tm brokenDownTime; gmtime_r( & now, & brokenDownTime );
+    char dateAndTime[] = "YYYYMMDDThhmmssZ";
+    strftime( dateAndTime, sizeof(dateAndTime), "%Y%m%dT%H%M%SZ",
+        & brokenDownTime );
+    char date[] = "YYYYMMDD";
+    strftime( date, sizeof(date), "%Y%m%d", & brokenDownTime );
+
+    std::string host, region, bucket, key, canonicalURI;
+    if (!AWSv4Impl::parseS3URL(s3url, input_region, host, region, bucket, key, canonicalURI, err)) {
+        return false;
     }
 
     //
     // Construct the canonical request.
     //
-
-    // Part 1: The canonical URI.  Note that we don't have to worry about
-    // path normalization, because S3 keys aren't actually path names.
-    formatstr_cat( canonicalURI, "%s", AWSv4Impl::pathEncode(key).c_str() );
 
     // Part 4: The signed headers.
     std::string signedHeaders = "host";
@@ -341,6 +394,9 @@ generate_presigned_url( const std::string & accessKeyID,
     queries["X-Amz-SignedHeaders"] = signedHeaders;
     if(! securityToken.empty()) {
         queries["X-Amz-Security-Token"] = securityToken;
+    }
+    for (const auto &param : query_parameters) {
+        queries.insert(param);
     }
 
     std::string buffer;
@@ -397,6 +453,7 @@ bool
 htcondor::generate_presigned_url( const classad::ClassAd & jobAd,
   const std::string & s3url,
   const std::string & verb,
+  const std::map<std::string, std::string> & query_params,
   std::string & presignedURL,
   CondorError & err ) {
 	std::string accessKeyIDFile;
@@ -446,5 +503,5 @@ htcondor::generate_presigned_url( const classad::ClassAd & jobAd,
 	jobAd.EvaluateAttrString( ATTR_AWS_REGION, region );
 
 	return generate_presigned_url( accessKeyID, secretAccessKey, securityToken,
-		s3url, region, verb, presignedURL, err );
+		s3url, region, verb, query_params, presignedURL, err );
 }

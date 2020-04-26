@@ -8650,7 +8650,27 @@ int SubmitHash::load_external_q_foreach_items (
 		} else if (o.foreach_mode == foreach_matching_any) {
 			expand_options &= ~(EXPAND_GLOBS_TO_FILES|EXPAND_GLOBS_TO_DIRS);
 		}
-		citems = submit_expand_globs(o.items, expand_options, errmsg);
+		{
+			// Fake a job ad containing AWS access keys
+			classad::ClassAd ad;
+			const char *tmp;
+			if ( (tmp = submit_param( SUBMIT_KEY_EC2AccessKeyId, ATTR_EC2_ACCESS_KEY_ID ))
+				|| (tmp = submit_param( SUBMIT_KEY_AWSAccessKeyIdFile, ATTR_EC2_ACCESS_KEY_ID )) )
+			{
+				ad.InsertAttr(ATTR_EC2_ACCESS_KEY_ID, tmp);
+			}
+			if ( (tmp = submit_param( SUBMIT_KEY_EC2SecretAccessKey, ATTR_EC2_SECRET_ACCESS_KEY ))
+				|| (tmp = submit_param( SUBMIT_KEY_AWSSecretAccessKeyFile, ATTR_EC2_SECRET_ACCESS_KEY)) )
+			{
+				ad.InsertAttr(ATTR_EC2_SECRET_ACCESS_KEY, tmp);
+			}
+			if ( (tmp = submit_param( SUBMIT_KEY_AWSRegion, ATTR_AWS_REGION )) )
+			{
+				ad.InsertAttr(ATTR_AWS_REGION, tmp);
+			}
+
+			citems = submit_expand_globs(o.items, expand_options, &ad, errmsg);
+		}
 		if ( ! errmsg.empty()) {
 			if (citems >= 0) {
 				push_warning(stderr, "%s", errmsg.c_str());

@@ -1024,7 +1024,7 @@ const struct SimpleSubmitKeyword * get_submit_keywords();
 #define EXPAND_GLOBS_TO_DIRS    (1<<4) // when you want dirs only
 #define EXPAND_GLOBS_TO_FILES   (1<<5) // when you want files only
 
-int submit_expand_globs(StringList &items, int options, std::string & errmsg);
+int submit_expand_globs(StringList &items, int options, classad::ClassAd *ad, std::string & errmsg);
 #endif // EXPAND_GLOBS
 
 const	int			SCHEDD_INTERVAL_DEFAULT = 300;

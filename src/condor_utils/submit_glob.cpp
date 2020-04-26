@@ -46,6 +46,7 @@
 #include "string_list.h"
 #include "directory.h"
 #include "filename_tools.h"
+#include "file_transfer.h"
 #include "fs_util.h"
 #include "condor_url.h"
 #include "condor_version.h"
@@ -100,6 +101,15 @@ void globfree(glob_t *pglob);
 #include <string>
 #include <set>
 #include <vector>
+
+// In order to expand URL globs, we may initialize a FTO.  Since it isn't
+// needed in most cases (and is independent of the job ad itself), we
+// initialize on-demand and reuse globally.
+// NOTE: This means that the FTO may have the incorrect list of plugins across
+// reconfig's.
+namespace {
+	std::unique_ptr<FileTransfer> g_fto;
+};
 
 static bool Search(char ** array, int length, char* key, int &index)
 {
@@ -169,6 +179,29 @@ static bool is_dir(const char * filename)
 	return (ch == '/' || ch == '\\');
 }
 
+	// Given a URL, invoke the appropriate file transfer plugin
+	// using the FTO.  Append any resulting items to the global list
+	// and return the number of items appended.
+	// Returns a negative value on error.
+static int submit_expand_url(const std::string &pattern, StringList &items, classad::ClassAd *ad, CondorError &err)
+{
+	if (!g_fto) {
+		g_fto.reset(new FileTransfer());
+		g_fto->InitializePlugins(err);
+	}
+	if (ad) {g_fto->SetJobAd(*ad);}
+
+	std::vector<std::string> url_list;
+	auto result = g_fto->InvokeListingPlugin(pattern, url_list, err);
+	if (result != TransferPluginResult::Success) {
+		return -static_cast<int>(result);
+	}
+	for (const auto &url : url_list) {
+		items.append(url.c_str());
+	}
+	return url_list.size();
+}
+
 //#define XXXX(o) #o
 //#define XXX(o) XXXX(o)
 //#define XX(o) #o "=" XXX(o) "\n"
@@ -176,7 +209,7 @@ static bool is_dir(const char * filename)
 //fprintf(stderr, "\n" XX(GLOB_ERR) XX(GLOB_MARK) XX(GLOB_NOSORT) XX(GLOB_DOOFFS) XX(GLOB_NOCHECK) XX(GLOB_APPEND) XX(GLOB_NOESCAPE) );
 //fprintf(stderr, "\n" XX(GLOB_PERIOD) XX(GLOB_ALTDIRFUNC) XX(GLOB_BRACE) XX(GLOB_NOMAGIC) XX(GLOB_TILDE) XX(GLOB_TILDE_CHECK) XX(GLOB_ONLYDIR) );
 
-int submit_expand_globs(StringList &items, int options, std::string & errmsg)
+int submit_expand_globs(StringList &items, int options, classad::ClassAd *ad, std::string & errmsg)
 {
 	StringList globs(items);
 	items.clearAll();
@@ -208,8 +241,21 @@ int submit_expand_globs(StringList &items, int options, std::string & errmsg)
 	size_t last_pathc = 0;
 	std::vector<glob_stats> matches;
 	int num_empty_globs = 0;
+	int citems = 0;
 
 	while ((pattern = globs.next())) {
+
+			// URLs have a separate function to handle them.
+		if (IsUrl(pattern)) {
+			CondorError err;
+			auto retval = submit_expand_url(pattern, items, ad, err);
+			if (retval < 0) {
+				if (!err.empty()) errmsg = err.message();
+				return retval;
+			}
+			citems += retval;
+		}
+
 		int rval = glob(pattern, GLOB_MARK | glob_options | glob_append, NULL, &files);
 		//fprintf(stderr, "\nglob '%s' returned %d (%d, %p, %d)\n", pattern, rval, (int)files.gl_offs, files.gl_pathv, (int)files.gl_pathc);
 		if (rval != 0) {
@@ -269,7 +315,6 @@ int submit_expand_globs(StringList &items, int options, std::string & errmsg)
 
 	// fill the returned items StringList
 	int ix_glob = 0;
-	int citems = 0;
 	//fprintf(stderr, "\nglob returned (%d, %p, %d)\n", (int)files.gl_offs, files.gl_pathv, (int)files.gl_pathc);
 	for (size_t ii = 0; ii < files.gl_pathc; ++ii) {
 		while (matches[ix_glob].pathc <= ii) {
