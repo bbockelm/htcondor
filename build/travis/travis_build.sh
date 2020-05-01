@@ -119,7 +119,13 @@ if [[ -z $DOCKER_IMAGE ]]; then
     time make -j2
 else
     touch bld_external_rhel bld_external
-    sudo docker run --rm=true -w "`pwd`" -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/build_inside_docker.sh"
+    if [[ -z $PACKAGE_BUILD ]]; then
+        sudo docker run --rm=true -w "`pwd`" -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/build_inside_docker.sh"
+    else
+        mkdir -p $HOME/rpmbuild
+        sudo docker run --rm=true -w "`pwd`" -v $HOME/rpmbuild:/root/rpmbuild -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/proper_build_inside_docker.sh"
+        ls $HOME/rpmbuild/RPMS/x86_64/
+    fi
 fi
 
 # vim:et:sw=4:sts=4:ts=8
