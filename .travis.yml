@@ -7,7 +7,7 @@ dist: xenial
 matrix:
     include:
         - os: linux
-          env: PACKAGE_BUILD=ON DOCKER_IMAGE=htcondor:build-centos7
+          env: PACKAGE_BUILD=ON DOCKER_IMAGE=htcondor/build-centos7
 
 cache:
     directories:
