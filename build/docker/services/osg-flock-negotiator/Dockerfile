@@ -12,11 +12,14 @@ LABEL org.label-schema.name="htcondor/cm:${VERSION}-el${EL}${SUFFIX}" \
       org.label-schema.vendor="HTCondor" \
       org.label-schema.license="Apache-2.0"
 
+USER root
+
 COPY osg-flock/rpmbuild/*.rpm /root/
+COPY osg-flock-negotiator/config.d/* /etc/condor/config.d/
 
 RUN yum localinstall /root/*.rpm && \
     git clone https://github.com/opensciencegrid/osg-flock.git && \
-    cp flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/
+    cp osg-flock/flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/
 
 EXPOSE 9618
 
