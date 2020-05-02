@@ -23,4 +23,6 @@ RUN yum localinstall /root/*.rpm && \
 
 EXPOSE 9618
 
+ENTRYPOINT ["condor_negotiator", "-f", "-p", "9618"]
+
 LABEL org.label-schema.build-date="${BUILDDATE}"
