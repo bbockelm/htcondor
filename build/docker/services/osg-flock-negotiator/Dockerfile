@@ -14,7 +14,7 @@ LABEL org.label-schema.name="htcondor/cm:${VERSION}-el${EL}${SUFFIX}" \
 
 USER root
 
-COPY osg-flock/rpmbuild/*.rpm /root/
+COPY osg-flock-negotiator/rpmbuild/*.rpm /root/
 COPY osg-flock-negotiator/config.d/* /etc/condor/config.d/
 
 RUN yum localinstall /root/*.rpm && \
