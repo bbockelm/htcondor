@@ -126,11 +126,16 @@ else
         chmod 0777 $HOME/rpmbuild
         sudo docker run --rm=true -w "`pwd`" -v $HOME/rpmbuild:/home/build/rpmbuild -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/proper_build_inside_docker.sh"
         ls $HOME/rpmbuild/RPMS/x86_64/
-        pushd ../docker/services/
-        mkdir osg-flock-negotiator/rpmbuild
-        cp $HOME/rpmbuild/RPMS/x86_64/*.rpm  osg-flock/rpmbuild-negotiator/
+        pushd build/docker/services/
+        mkdir -p osg-flock-negotiator/rpmbuild
+        cp $HOME/rpmbuild/RPMS/x86_64/*.rpm  osg-flock-negotiator/rpmbuild/
+        rm osg-flock-negotiator/rpmbuild/{condor-annex-ec2,condor-bosco,condor-kbdd,condor-test,condor-vm-gahp,minicondor,condor-all}-*
         sudo docker build --build-arg EL=7 --build-arg VERSION=8.9.6 --build-arg BUILDDATE=`date +%Y%m%d` -t htcondor/base -f base/Dockerfile .
         sudo docker build --build-arg EL=7 --build-arg BUILDDATE=`date +%Y%m%d` -t opensciencegrid/flock-negotiator -f osg-flock/Dockerfile .
+        if [[ -n "$DOCKER_USERNAME" ]]; then
+            echo "$DOCKER_PASSWORD" | sudo docker login -u "$DOCKER_USERNAME" --password-stdin
+            sudo docker push opensciencegrid/flock-negotiator
+        fi
     fi
 fi
 
