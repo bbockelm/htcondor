@@ -17,8 +17,7 @@ USER root
 COPY osg-flock-negotiator/rpmbuild/*.rpm /root/
 COPY osg-flock-negotiator/config.d/* /etc/condor/config.d/
 
-RUN rpm -e condor-externals && \
-    yum localinstall /root/*.rpm && \
+RUN yum localinstall --disablerepo=htcondor-development /root/*.rpm && \
     git clone https://github.com/opensciencegrid/osg-flock.git && \
     cp osg-flock/flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/
 
