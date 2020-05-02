@@ -123,8 +123,13 @@ else
         sudo docker run --rm=true -w "`pwd`" -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/build_inside_docker.sh"
     else
         mkdir -p $HOME/rpmbuild
-        sudo docker run --rm=true -w "`pwd`" -v $HOME/rpmbuild:/root/rpmbuild -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/proper_build_inside_docker.sh"
+        sudo docker run --rm=true -w "`pwd`" -v $HOME/rpmbuild:/home/build/rpmbuild -v "`pwd`:`pwd`" $DOCKER_IMAGE /bin/bash -x "$progdir/proper_build_inside_docker.sh"
         ls $HOME/rpmbuild/RPMS/x86_64/
+        pushd ../docker/services/
+        mkdir osg-flock/rpmbuild
+        cp $HOME/rpmbuild/RPMS/x86_64/*.rpm  osg-flock/rpmbuild/
+        sudo docker build --build-arg EL=7 --build-arg VERSION=8.9.6 --build-arg BUILDDATE=`date +%Y%m%d` -t htcondor/base -f base/Dockerfile .
+        sudo docker build --build-arg EL=7 --build-arg BUILDDATE=`date +%Y%m%d` -t opensciencegrid/flock-negotiator -f osg-flock/Dockerfile .
     fi
 fi
 
