@@ -21,6 +21,7 @@ RUN rpm -Uhv https://repo.opensciencegrid.org/osg/3.5/osg-3.5-el7-release-latest
     rpmkeys --import /etc/pki/rpm-gpg/RPM-GPG-KEY-OSG && \
     (rpm -qi gpg-pubkey-824b8603 | gpg --keyid-format 0xlong | grep -q '1024D/0x2110B1C8824B8603') && \
     yum -y localinstall --disablerepo=htcondor-development /root/*.rpm && \
+    yum -y install git && \
     git clone https://github.com/opensciencegrid/osg-flock.git && \
     cp osg-flock/flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/
 
