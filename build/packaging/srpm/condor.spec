@@ -49,6 +49,10 @@
 %define cream 0
 %endif
 
+%if 0%{?noblahp}
+%define blahp 0
+%endif
+
 # Python on 64-bit platform or rhel6
 %ifarch x86_64
 %define python 1

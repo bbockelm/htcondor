@@ -17,6 +17,6 @@ pushd $HOME/cmake_build
 time cmake ${CMAKE_OPTIONS[@]} $OLDPWD
 time make srpm
 rpm -Uhv build/packaging/srpm/condor-*.src.rpm
-rpmbuild -D 'osg 1' -ba ~/rpmbuild/SPECS/condor.spec
+rpmbuild -D 'noblahp 1' -D 'osg 1' -ba ~/rpmbuild/SPECS/condor.spec
 
 # vim:et:sw=4:sts=4:ts=8
