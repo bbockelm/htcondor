@@ -15,18 +15,18 @@ LABEL org.label-schema.name="htcondor/cm:${VERSION}-el${EL}${SUFFIX}" \
 USER root
 
 COPY osg-flock-negotiator/rpmbuild/*.rpm /root/
-COPY osg-flock-negotiator/config.d/* /etc/condor/config.d/
+COPY container-files /
 
 RUN rpm -Uhv https://repo.opensciencegrid.org/osg/3.5/osg-3.5-el7-release-latest.rpm && \
     rpmkeys --import /etc/pki/rpm-gpg/RPM-GPG-KEY-OSG && \
     (rpm -qi gpg-pubkey-824b8603 | gpg --keyid-format 0xlong | grep -q '1024D/0x2110B1C8824B8603') && \
     yum -y localinstall --disablerepo=htcondor-development /root/*.rpm && \
-    yum -y install git && \
+    yum -y install git supervisor && \
     git clone https://github.com/opensciencegrid/osg-flock.git && \
-    cp osg-flock/flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/
+    cp osg-flock/flock.opensciencegrid.org/htcondor/config.d/* /etc/condor/config.d/ && \
+    rm -rf osg-flock && \
+    yum clean all && rm -rf /tmp/yum*
 
-EXPOSE 9618
-
-ENTRYPOINT ["condor_negotiator", "-f", "-p", "9618"]
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
 
 LABEL org.label-schema.build-date="${BUILDDATE}"
