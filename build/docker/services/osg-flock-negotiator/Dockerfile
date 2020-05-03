@@ -15,7 +15,7 @@ LABEL org.label-schema.name="htcondor/cm:${VERSION}-el${EL}${SUFFIX}" \
 USER root
 
 COPY osg-flock-negotiator/rpmbuild/*.rpm /root/
-COPY container-files /
+COPY osg-flock-negotiator/container-files /
 
 RUN rpm -Uhv https://repo.opensciencegrid.org/osg/3.5/osg-3.5-el7-release-latest.rpm && \
     rpmkeys --import /etc/pki/rpm-gpg/RPM-GPG-KEY-OSG && \
