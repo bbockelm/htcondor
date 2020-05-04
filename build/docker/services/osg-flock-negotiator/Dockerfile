@@ -27,6 +27,6 @@ RUN rpm -Uhv https://repo.opensciencegrid.org/osg/3.5/osg-3.5-el7-release-latest
     rm -rf osg-flock && \
     yum clean all && rm -rf /tmp/yum*
 
-ENTRYPOINT ["usr/local/sbin/supervisord_startup.sh"]
+ENTRYPOINT ["/usr/local/sbin/supervisord_startup.sh"]
 
 LABEL org.label-schema.build-date="${BUILDDATE}"
