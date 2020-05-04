@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: osg-flock-negotiator-pv-claim
+  labels:
+    app: osg-flock-negotiator
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osg-flock-negotiator
+  labels:
+    app: osg-flock-negotiator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: osg-flock-negotiator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: osg-flock-negotiator
+    spec:
+      containers:
+      - name: osg-flock-negotiator
+        image: opensciencegrid/flock-negotiator:latest
+        volumeMounts:
+        - name: negotiator-persistent-storage
+          mountPath: /var/lib/condor/spool
+        - name: negotiator-tokens
+          mountPath: /etc/condor/tokens-orig.d
+      volumes:
+      - name: negotiator-persistent-storage
+        persistentVolumeClaim:
+          claimName: osg-flock-negotiator-pv-claim
+      - name: negotiator-tokens
+        secret:
+          secretName: negotiator-tokens
