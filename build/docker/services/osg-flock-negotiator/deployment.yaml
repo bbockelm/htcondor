@@ -37,6 +37,8 @@ spec:
           mountPath: /var/lib/condor/spool
         - name: negotiator-tokens
           mountPath: /etc/condor/tokens-orig.d
+        - name: negotiator-passwords
+          mountPath: /etc/condor/passwords-orig.d
       volumes:
       - name: negotiator-persistent-storage
         persistentVolumeClaim:
@@ -44,3 +46,6 @@ spec:
       - name: negotiator-tokens
         secret:
           secretName: negotiator-tokens
+      - name: negotiator-passwords
+        secret:
+          secretName: negotiator-passwords
