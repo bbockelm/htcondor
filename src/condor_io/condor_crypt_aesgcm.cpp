@@ -28,6 +28,8 @@
 #define IV_SIZE 12
 #define MAC_SIZE 16
 
+//#define AESGCM_DEBUG
+
 unsigned char g_unset_iv[IV_SIZE] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 Condor_Crypt_AESGCM::Condor_Crypt_AESGCM(const KeyInfo& key)
@@ -42,7 +44,9 @@ Condor_Crypt_AESGCM::~Condor_Crypt_AESGCM()
 
 void Condor_Crypt_AESGCM::resetState()
 {
+#ifdef AESGCM_DEBUG
 	dprintf(D_NETWORK, "Condor_Crypt_AESGCM::resetState\n");
+#endif
 	m_state.reset(new CryptoState());
 	while (!memcmp(m_state->m_iv_enc.iv, g_unset_iv, IV_SIZE)) {
 		RAND_pseudo_bytes(m_state->m_iv_enc.iv, IV_SIZE);
@@ -52,7 +56,9 @@ void Condor_Crypt_AESGCM::resetState()
 
 void Condor_Crypt_AESGCM::resetState(std::shared_ptr<CryptoState> state)
 {
+#ifdef AESGCM_DEBUG
 	dprintf(D_NETWORK, "Condor_Crypt_AESGCM::resetState with key\n");
+#endif
 	if (state.get()) {
 		m_state = state;
 		if (!memcmp(m_state->m_iv_enc.iv, g_unset_iv, IV_SIZE)) {
@@ -66,7 +72,9 @@ void Condor_Crypt_AESGCM::resetState(std::shared_ptr<CryptoState> state)
 			dprintf(D_NETWORK, "Condor_Crypt_AESGCM::resetState - Max session reuse hit!\n");
 		m_state->m_ctr_enc = 0;
 		m_state->m_ctr_dec = 0;
+#ifdef AESGCM_DEBUG
 		dprintf(D_NETWORK, "Condor_Crypt_AESGCM::resetState: Connection count %u.\n", m_state->m_ctr_conn);
+#endif
 	} else {
 		resetState();
 	}	
@@ -87,7 +95,9 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
                                   unsigned char *      output, 
                                   int                  output_buf_len)
 {
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::encrypt with %d bytes of input\n", input_len);
+#endif
 
         // output length must be aligned to nearest 128-bit block for AES-GCM
     int output_len = input_len;
@@ -142,6 +152,7 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
     memcpy(iv + sizeof(ctr_enc), &ctr_enc_conn, sizeof(ctr_enc_conn));
     memcpy(iv + 2*sizeof(ctr_enc), m_state->m_iv_enc.iv + 2*sizeof(ctr_enc), IV_SIZE - 2*sizeof(ctr_enc));
 
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "IV base value %d\n", base);
     dprintf(D_NETWORK, "IV Counter value %u\n", m_state->m_ctr_enc);
     dprintf(D_NETWORK, "IV Counter plus base value %d\n", result);
@@ -150,6 +161,7 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
     dprintf(D_NETWORK, "IV conn base value %d\n", base_conn);
     dprintf(D_NETWORK, "Connection Counter plus base value %d\n", result_conn);
     dprintf(D_NETWORK, "IV conn ctr value %d\n", ctr_enc_conn);
+#endif
 
         // Only need to send IV for the first encrypted packet.
     if (m_state->m_ctr_enc == 0) {
@@ -157,9 +169,11 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
         memcpy(output, iv, IV_SIZE);
     }
 
+#ifdef AESGCM_DEBUG
     char hex[3 * IV_SIZE + 1];
     dprintf(D_ALWAYS,"IO: Outgoing IV : %s\n",
         debug_hex_dump(hex, reinterpret_cast<char*>(iv), IV_SIZE));
+#endif
 
     if (get_key().getProtocol() != CONDOR_AESGCM) {
         dprintf(D_NETWORK, "Failed to have correct AES-GCM key type.\n");
@@ -173,8 +187,10 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
 
     // Authenticate additional data from the caller.
     int len;
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "We have %d bytes of AAD data: %s\n",
         aad_len, debug_hex_dump(hex, reinterpret_cast<const char *>(aad), std::min(IV_SIZE, aad_len)));
+#endif
     if (aad && (1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len))) {
         dprintf(D_NETWORK, "Failed to authenticate caller input data.\n");
         return false;
@@ -185,22 +201,25 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
         return false;
     }
 
-    dprintf(D_NETWORK, "First byte of plaintext is %0x\n", *input);
     if (1 != EVP_EncryptUpdate(ctx, output + IV_SIZE * (m_state->m_ctr_enc ? 0 : 1),
         &len, input, input_len))
     {
         dprintf(D_NETWORK, "Failed to encrypt plaintext buffer.\n");
         return false;
     }
+#ifdef AESGCM_DEBUG
+    dprintf(D_NETWORK, "First byte of plaintext is %0x\n", *input);
     dprintf(D_NETWORK, "First %d bytes written to ciphertext.\n", len);
+#endif
 
     int len2;
     if (1 != EVP_EncryptFinal_ex(ctx, output + IV_SIZE * (m_state->m_ctr_enc ? 0 : 1) + len, &len2)) {
         dprintf(D_NETWORK, "Failed to finalize cipher text.\n");
         return false;
     }
-    dprintf(D_NETWORK, "Finalized an additional %d bytes written to ciphertext.\n", len2);
     len += len2;
+#ifdef AESGCM_DEBUG
+    dprintf(D_NETWORK, "Finalized an additional %d bytes written to ciphertext.\n", len2);
     dprintf(D_NETWORK,
         "Condor_Crypt_AESGCM::encrypt Plain text: %0x %0x %0x %0x ... %0x %0x %0x %0x\n",
         *(input),
@@ -222,22 +241,24 @@ bool Condor_Crypt_AESGCM::encrypt(const unsigned char *aad,
         *(output + output_len - MAC_SIZE - 3),
         *(output + output_len - MAC_SIZE - 2),
         *(output + output_len - MAC_SIZE - 1));
-
+#endif
 
     if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, MAC_SIZE, output + output_len - MAC_SIZE)) {
         dprintf(D_NETWORK, "Failed to get tag.\n");
         return false;
     }
-    char hex2[3 * MAC_SIZE + 1];
-    dprintf(D_ALWAYS,"Condor_Crypt_AESGCM::encrypt: Outgoing MAC : %s\n",
-        debug_hex_dump(hex2, reinterpret_cast<char*>(output + output_len - MAC_SIZE), MAC_SIZE));
 
     memcpy(m_state->m_prev_mac_enc, output + output_len - MAC_SIZE, MAC_SIZE);
 
         // Only change state if everything was successful.
     m_state->m_ctr_enc++;
 
+#ifdef AESGCM_DEBUG
+    char hex2[3 * MAC_SIZE + 1];
+    dprintf(D_ALWAYS,"Condor_Crypt_AESGCM::encrypt: Outgoing MAC : %s\n",
+        debug_hex_dump(hex2, reinterpret_cast<char*>(output + output_len - MAC_SIZE), MAC_SIZE));
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::encrypt.  Successful encryption with cipher text %d bytes.\n", output_len);
+#endif
     return true;
 }
 
@@ -249,8 +270,9 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
                                   int&                   output_len)
 {
     EVP_CIPHER_CTX *ctx;
-
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt with input buffer %d.\n", input_len);
+#endif
 
     if (output_len < input_len) {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt - output length %d must be at least the size of input %d.\n", output_len, input_len);
@@ -297,17 +319,20 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
     int32_t base = ntohl(m_state->m_iv_dec.ctr.pkt);
     int32_t result = base + *reinterpret_cast<int32_t*>(&m_state->m_ctr_dec);
     int32_t ctr_enc = htonl(result);
+    int32_t base_conn = ntohl(m_state->m_iv_dec.ctr.conn);
+    int32_t result_conn = base_conn + *reinterpret_cast<int32_t*>(&m_state->m_ctr_conn);
+    int32_t ctr_enc_conn = htonl(result_conn);
+
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "IV Packet base %d\n", base);
     dprintf(D_NETWORK, "IV Counter value %u\n", m_state->m_ctr_dec);
     dprintf(D_NETWORK, "IV Counter + base value %d\n", result);
     dprintf(D_NETWORK, "IV ctr value (encoded) %d\n", ctr_enc);
 
-    int32_t base_conn = ntohl(m_state->m_iv_dec.ctr.conn);
-    int32_t result_conn = base_conn + *reinterpret_cast<int32_t*>(&m_state->m_ctr_conn);
-    int32_t ctr_enc_conn = htonl(result_conn);
     dprintf(D_NETWORK, "IV Connection base %d\n", base_conn);
     dprintf(D_NETWORK, "IV Connection counter value %d\n", m_state->m_ctr_conn);
     dprintf(D_NETWORK, "IV Connection base + counter value (enc) %d\n", ctr_enc_conn);
+#endif
 
         // Assemble our expected IV.
     unsigned char iv[IV_SIZE];
@@ -315,6 +340,7 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
     memcpy(iv + sizeof(ctr_enc), &ctr_enc_conn, sizeof(ctr_enc_conn));
     memcpy(iv + 2*sizeof(ctr_enc), m_state->m_iv_dec.iv + 2*sizeof(ctr_enc), IV_SIZE - 2*sizeof(ctr_enc));
 
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt about to init key %0x %0x %0x %0x.\n",
         *(get_key().getKeyData()), *(get_key().getKeyData() + 15),
         *(get_key().getKeyData() + 16), *(get_key().getKeyData() + 31));
@@ -323,15 +349,13 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
     dprintf(D_ALWAYS,"IO: Incoming IV : %s\n",
         debug_hex_dump(hex,
         reinterpret_cast<const char *>(iv), IV_SIZE));
-
+#endif
     if (!EVP_DecryptInit_ex(ctx, NULL, NULL, get_key().getKeyData(), iv)) {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt failed due to failed init.\n");
         return false;
     }
 
     int len;
-    dprintf(D_NETWORK, "We have %d bytes of AAD data: %s\n",
-        aad_len, debug_hex_dump(hex, reinterpret_cast<const char *>(aad), std::min(IV_SIZE, aad_len)));
     if (aad && !EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)) {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt failed when authenticating user AAD.\n");
         return false;
@@ -342,14 +366,22 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
         return false;
     }
 
+#ifdef AESGCM_DEBUG
+    dprintf(D_NETWORK, "We have %d bytes of AAD data: %s\n",
+        aad_len, debug_hex_dump(hex, reinterpret_cast<const char *>(aad), std::min(IV_SIZE, aad_len)));
     dprintf(D_NETWORK,
         "Condor_Crypt_AESGCM::decrypt about to decrypt cipher text."
         " Input length is %d\n",
         input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE);
-    if (!EVP_DecryptUpdate(ctx, output, &len, input + IV_SIZE * (m_state->m_ctr_dec ? 0 : 1), input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE)) {
+#endif
+    if (!EVP_DecryptUpdate(ctx, output, &len,
+        input + IV_SIZE * (m_state->m_ctr_dec ? 0 : 1),
+        input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE))
+    {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt failed due to failed cipher text update.\n");
         return false;
     }
+#ifdef AESGCM_DEBUG
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt produced output of size %d with value %0x\n", len, *output);
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt Plain text: "
         "%0x %0x %0x %0x ... %0x %0x %0x %0x\n",
@@ -371,31 +403,30 @@ bool Condor_Crypt_AESGCM::decrypt(const unsigned char *  aad,
         *(input + input_len - MAC_SIZE - 3),
         *(input + input_len - MAC_SIZE - 2),
         *(input + input_len - MAC_SIZE - 1));
- 
+#endif
     if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, MAC_SIZE, const_cast<unsigned char *>(input + input_len - MAC_SIZE))) {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt failed due to failed set of tag.\n");
         return false;
     }
 
-    char hex2[3 * MAC_SIZE + 1];
-    dprintf(D_ALWAYS,"Condor_Crypt_AESGCM::decrypt: Incoming MAC : %s\n",
-        debug_hex_dump(hex2, reinterpret_cast<const char*>(input + input_len - MAC_SIZE), MAC_SIZE));
-
-
     memcpy(m_state->m_prev_mac_dec, input + input_len - MAC_SIZE, MAC_SIZE);
 
-    dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt about to finalize output.\n");
     if (!EVP_DecryptFinal_ex(ctx, output + len, &len)) {
         dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt failed due to finalize decryption and check of tag.\n");
        return false;
     }
 
-    dprintf(D_NETWORK, "decrypt; input_len is %d and output_len is %d\n", input_len, input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE);
     output_len = input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE;
 
         // Only touch state after success
     m_state->m_ctr_dec ++;
 
+#ifdef AESGCM_DEBUG
+    char hex2[3 * MAC_SIZE + 1];
+    dprintf(D_ALWAYS,"Condor_Crypt_AESGCM::decrypt: Incoming MAC : %s\n",
+        debug_hex_dump(hex2, reinterpret_cast<const char*>(input + input_len - MAC_SIZE), MAC_SIZE));
+    dprintf(D_NETWORK, "decrypt; input_len is %d and output_len is %d\n", input_len, input_len - IV_SIZE * (m_state->m_ctr_dec ? 0 : 1) - MAC_SIZE);
     dprintf(D_NETWORK, "Condor_Crypt_AESGCM::decrypt.  Successful decryption with plain text %d bytes.\n", output_len);
+#endif
     return true;
 }
