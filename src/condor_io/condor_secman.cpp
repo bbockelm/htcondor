@@ -3356,23 +3356,31 @@ SecMan::CreateNonNegotiatedSecuritySession(DCpermission auth_level, char const *
 	}
 
 	Protocol crypt_protocol = getCryptProtocolNameToEnum(crypto_method.c_str());
-	unsigned char* keybuf = Condor_Crypt_Base::oneWayHashKey(private_key);
-	if(!keybuf) {
-		dprintf(D_ALWAYS,"SECMAN: failed to create non-negotiated security session %s because"
-				" oneWayHashKey() failed.\n",sesid);
-		return false;
-	}
 	KeyInfo *keyinfo;
 	if (crypt_protocol == CONDOR_AESGCM) {
-		unsigned char keybuf2[32];
-		memcpy(keybuf2, keybuf, 16);
-		memcpy(keybuf2 + 16, keybuf, 16);
-		keyinfo = new KeyInfo(keybuf2, 32, crypt_protocol, 0, std::shared_ptr<CryptoState>());
+		std::vector<unsigned char> keybuf;
+		keybuf.reserve(AUTH_PW_KEY_STRENGTH);
+		if (Condor_Auth_Passwd::hkdf(
+			reinterpret_cast<const unsigned char *>(private_key), strlen(private_key),
+			reinterpret_cast<const unsigned char *>("htcondor key"), 12,
+			reinterpret_cast<const unsigned char *>("aes-gcm"), 7,
+			&keybuf[0], AUTH_PW_KEY_STRENGTH))
+		{
+			dprintf(D_ALWAYS, "SECMAN: failed to generate new key for use with AES-GCM.\n");
+			return false;
+		}
+		keyinfo = new KeyInfo(&keybuf[0], AUTH_PW_KEY_STRENGTH,
+			crypt_protocol, 0, std::shared_ptr<CryptoState>());
 	} else {
-		keyinfo = new KeyInfo(keybuf,MAC_SIZE,crypt_protocol, 0, std::shared_ptr<CryptoState>());
+		std::unique_ptr<unsigned char, decltype(&free)> keybuf(Condor_Crypt_Base::oneWayHashKey(private_key), &free);
+		if(!keybuf) {
+			dprintf(D_ALWAYS,"SECMAN: failed to create non-negotiated security session %s because"
+				" oneWayHashKey() failed.\n",sesid);
+			return false;
+		}
+		keyinfo = new KeyInfo(keybuf.get(), MAC_SIZE, crypt_protocol,
+			0, std::shared_ptr<CryptoState>());
 	}
-	free( keybuf );
-	keybuf = NULL;
 
 		// extract the session duration from the (imported) policy
 	int expiration_time = 0;
