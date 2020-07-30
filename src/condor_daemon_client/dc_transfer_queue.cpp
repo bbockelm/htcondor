@@ -244,7 +244,7 @@ DCTransferQueue::RequestTransferQueueSlot(bool downloading,filesize_t sandbox_si
 	msg.Assign(ATTR_DOWNLOADING,downloading);
 	msg.Assign(ATTR_FILE_NAME,fname);
 	msg.Assign(ATTR_JOB_ID,jobid);
-	msg.Assign(ATTR_USER,queue_user);
+	msg.Assign(ATTR_USER,queue_user); // USAGE_OK
 	msg.Assign(ATTR_SANDBOX_SIZE,sandbox_size);
 
 	m_xfer_queue_sock->encode();

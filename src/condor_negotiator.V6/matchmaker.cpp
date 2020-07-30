@@ -3565,6 +3565,49 @@ sumSlotWeights(ClassAdListDoesNotDeleteAds &startdAds, double* minSlotWeight, Ex
 	return sum;
 }
 
+
+bool
+Matchmaker::TransformSubmitterAd(classad::ClassAd &ad)
+{
+	std::string map_names;
+	if (!param(map_names, "NEGOTIATOR_CLASSAD_USER_MAP_NAMES")) {
+		return true;
+	}
+	StringList map_names_list(map_names.c_str());
+	if (!map_names_list.contains("GROUP_PREFIX")) {
+		return true;
+	}
+
+	std::vector<classad::ExprTree*> args;
+	args.reserve(2);
+	args.push_back(classad::Literal::MakeString("GROUP_PREFIX"));
+	args.push_back(ad.LookupExpr(ATTR_AUTHENTICATED_IDENTITY)->Copy());
+	std::unique_ptr<ExprTree> fnCall(classad::FunctionCall::MakeFunctionCall("userMap", args));
+
+	classad::Value val;
+	fnCall->SetParentScope(&ad);
+	if (!fnCall->Evaluate(val)) {
+		// Avoid having an debug info emitted when this feature isn't used.
+		return true;
+	}
+	fnCall->SetParentScope(nullptr);
+
+	std::string new_prefix;
+	if (!val.IsStringValue(new_prefix)) {
+		return true;
+	}
+
+	std::string name;
+	if (!ad.EvaluateAttrString(ATTR_NAME, name)) {
+		return false;
+	}
+	if (!ad.InsertAttr("OriginalName", name)) {
+		return false;
+	}
+	std::string new_name = new_prefix + "." + name;
+	return ad.InsertAttr("Name", new_name);
+}
+
 bool Matchmaker::
 obtainAdsFromCollector (
 						ClassAdList &allAds,
@@ -3800,6 +3843,11 @@ obtainAdsFromCollector (
             }
 			if ( !IsValidSubmitterName( subname.c_str() ) ) {
 				dprintf( D_ALWAYS, "WARNING: ignoring submitter ad with invalid name: %s\n", subname.c_str() );
+				continue;
+			}
+
+			if (!TransformSubmitterAd(*ad)) {
+				dprintf( D_ALWAYS, "WARNING: Failed to transform the submitter ad with name; %s\n", subname.c_str() );
 				continue;
 			}
 
@@ -4444,7 +4492,12 @@ Matchmaker::startNegotiateProtocol(const std::string &submitter, const ClassAd &
 		ClassAd negotiate_ad;
 		int jmin, jmax;
 		// Tell the schedd to limit negotiation to this owner
-		negotiate_ad.InsertAttr(ATTR_OWNER, submitter);
+		std::string orig_submitter;
+		if (submitterAd.EvaluateAttrString("OriginalName", orig_submitter)) {
+			negotiate_ad.InsertAttr(ATTR_OWNER, orig_submitter);
+		} else {
+			negotiate_ad.InsertAttr(ATTR_OWNER, submitter);
+		}
 		// Tell the schedd to limit negotiation to this job priority range
 		if (want_globaljobprio && submitterAd.LookupInteger("JOBPRIO_MIN", jmin))
 		{

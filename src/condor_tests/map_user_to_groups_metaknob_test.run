@@ -42,6 +42,7 @@ CONDOR_TESTREQ_CONFIG
 # add this to the config use use when we start a secondary personal condor
 my $append_config = "
 	use FEATURE : AssignAccountingGroup($path)
+	SCHEDD_DEBUG = D_FULLDEBUG,D_SYSCALLS
 ";
 
 ###########  create submit file ##################

@@ -1905,7 +1905,7 @@ do_store_cred (
 		} else if (!(mode & STORE_CRED_LEGACY)) {
 			if ( ! sock->put(credlen)) {
 				sent = false;
-			} else if (credlen && ! sock->put_bytes(cred, credlen)) {
+			} else if (credlen && (sock->put_bytes(cred, credlen) == -1)) {
 				sent = false;
 			} else if (ad && ! putClassAd(sock, *ad)) {
 				sent = false;

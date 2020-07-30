@@ -38,6 +38,8 @@ my $config = <<'CONDOR_TESTREQ_CONFIG';
 
 DAEMON_LIST = $(DAEMON_LIST) JOB_ROUTER
 
+SCHEDD_DEBUG = D_FULLDEBUG,D_SYSCALLS
+
 NUM_CPUS = 5
 
 # (some) jobs will be routed to production or analysis resources, some jobs will be left unrouted

@@ -350,7 +350,7 @@ int TransferQueueManager::HandleRequest(int cmd,Stream *stream)
 	if( !msg.LookupBool(ATTR_DOWNLOADING,downloading) ||
 		!msg.LookupString(ATTR_FILE_NAME,fname) ||
 		!msg.LookupString(ATTR_JOB_ID,jobid) ||
-		!msg.LookupString(ATTR_USER,queue_user) ||
+		!msg.LookupString(ATTR_USER,queue_user) || // USAGE_OK
 		!msg.LookupInteger(ATTR_SANDBOX_SIZE,sandbox_size))
 	{
 		MyString msg_str;

@@ -2918,7 +2918,7 @@ NewProc(int cluster_id)
 			int ownerJobCount = ownerInfo->num.JobsCounted
 								+ ownerInfo->num.JobsRecentlyAdded
 								+ jobs_added_this_transaction;
-
+			dprintf(D_ALWAYS, "For owner %s, jobs counted %d, jobs recently added %d, jobs added this transaction %d.\n", owner, ownerInfo->num.JobsCounted, ownerInfo->num.JobsRecentlyAdded, jobs_added_this_transaction);
 			int maxJobsPerOwner = scheduler.getMaxJobsPerOwner();
 			if( ownerJobCount >= maxJobsPerOwner ) {
 				dprintf( D_ALWAYS,

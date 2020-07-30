@@ -2708,7 +2708,7 @@ Daemon::startTokenRequest( const std::string &identity,
 			dprintf(D_FULLDEBUG, "No UID_DOMAIN set!\n");
 			return false;
 		}
-		if (!ad.InsertAttr(ATTR_USER, "condor@" + domain)) {
+		if (!ad.InsertAttr(ATTR_USER, "condor@" + domain)) { // USAGE_OK
 			if (err) { err->pushf("DAEMON", 1, "Failed to set the default username"); }
 			dprintf(D_FULLDEBUG, "Failed to set the default username\n");
 			return false;
@@ -2722,12 +2722,12 @@ Daemon::startTokenRequest( const std::string &identity,
 				dprintf(D_FULLDEBUG, "No UID_DOMAIN set!\n");
 				return false;
 			}
-			if (!ad.InsertAttr(ATTR_USER, identity + "@" + domain)) {
+			if (!ad.InsertAttr(ATTR_USER, identity + "@" + domain)) { // USAGE_OK
 				if (err) { err->pushf("DAEMON", 1, "Unable to set requested id."); }
 				dprintf(D_FULLDEBUG, "Unable to set requested id.\n");
 				return false;
 			}
-		} else if (!ad.InsertAttr(ATTR_USER, identity)) {
+		} else if (!ad.InsertAttr(ATTR_USER, identity)) { // USAGE_OK
 			if (err) { err->pushf("DAEMON", 1, "Unable to set requested identity."); }
 			dprintf(D_FULLDEBUG, "Unable to set requested identity.\n");
 			return false;

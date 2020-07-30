@@ -761,7 +761,7 @@ bool doJobRunAnalysis (
 		job_status = "Nothing here.";
 		return 0;
 	}
-	request->LookupString(ATTR_USER, user);
+	request->LookupString(ATTR_USER, user); // USAGE_OK
 
 	int last_rej_match_time=0;
 	request->LookupInteger(ATTR_LAST_REJ_MATCH_TIME, last_rej_match_time);

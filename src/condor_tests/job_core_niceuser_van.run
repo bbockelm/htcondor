@@ -37,6 +37,7 @@ my $firstappend_condor_config = '
     DAEMON_LIST = MASTER,SCHEDD,COLLECTOR,NEGOTIATOR,STARTD
     NUM_CPUS = 1
     NEGOTIATOR_INTERVAL = 5
+    SCHEDD_DEBUG = D_FULLDEBUG,D_SYSCALLS
 ';
 
 my $configfile = CondorTest::CreateLocalConfig($firstappend_condor_config,"jobcoreniceuservan");
