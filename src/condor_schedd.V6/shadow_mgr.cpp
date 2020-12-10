@@ -26,6 +26,7 @@
 #include "condor_config.h"
 #include "classad_merge.h"
 #include "my_popen.h"
+#include "condor_uid.h"
 
 /*
 
@@ -268,12 +269,17 @@ ShadowMgr::makeShadow( const char* path )
 {
 	Shadow* new_shadow;
 	FILE* fp;
-	const char *args[] = {path, "-classad", NULL};
 	char buf[1024];
+	ArgList args;
+	args.AppendArg(path);
+	args.AppendArg("-classad");
 
 		// first, try to execute the given path with a "-classad"
 		// option, and grab the output as a ClassAd
-	fp = my_popenv( args, "r", FALSE );
+	{
+		TemporaryPrivSentry sentry(PRIV_ROOT);
+		fp = my_popen( args, "r", FALSE, nullptr, false );
+	}
 
 	if( ! fp ) {
 		dprintf( D_ALWAYS, "Failed to execute %s, ignoring\n", path );

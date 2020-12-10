@@ -594,7 +594,7 @@ int daemon::RealStart( )
 	}
 
 	shortname = condor_basename( process_name );
-
+/*
 	if( access(process_name,X_OK) != 0 ) {
 		dprintf(D_ALWAYS, "%s: Cannot execute (errno=%d, %s)\n", process_name, errno, strerror(errno) );
 		pid = 0; 
@@ -602,7 +602,7 @@ int daemon::RealStart( )
 		Restart();
 		return 0;
 	}
-
+*/
 	if( !m_after_startup_wait_for_file.IsEmpty() ) {
 		if (0 != remove( m_after_startup_wait_for_file.Value())) {
 			dprintf(D_ALWAYS, "Cannot remove wait-for-startup file %s\n", m_after_startup_wait_for_file.c_str());

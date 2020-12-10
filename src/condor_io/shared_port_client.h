@@ -32,6 +32,8 @@ friend class SharedPortState;
  public:
 	bool sendSharedPortID(char const *shared_port_id,Sock *sock);
 
+	void setSessionID(const std::string &session_id) {m_session_id = session_id;}
+
 	// PassSocket() returns TRUE on success, FALSE on False, or KEEP_STREAM if 
 	// non_blocking == true and the caller should NOT delete sock_to_pass because
 	// the operation is still pending (it will be deleted once the operation is complete).
@@ -51,6 +53,8 @@ friend class SharedPortState;
  private:
 	MyString myName();
 	bool static SharedPortIdIsValid(char const *name);
+
+	std::string m_session_id;
 
 	// Some operational metrics filled in by the SharedPortState
 	// class, which does the heavy lifting during a call to PassSocket().

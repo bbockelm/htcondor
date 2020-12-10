@@ -288,6 +288,8 @@ public:
 	const char * serialize(const char *);	// restore state from buffer
 	char * serialize() const;	// save state into buffer
 
+	void set_session_id(const std::string &session_id) {m_session_id = session_id;}
+
 //	PROTECTED INTERFACE TO RELIABLE SOCKS
 //
 protected:
@@ -401,6 +403,8 @@ private:
 	void init();				/* shared initialization method */
 
 	bool connect_socketpair_impl( ReliSock & dest, condor_protocol proto, bool isLoopback );
+
+	std::string m_session_id;
 };
 
 class BlockingModeGuard {

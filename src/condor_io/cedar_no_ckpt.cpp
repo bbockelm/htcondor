@@ -983,6 +983,7 @@ int Sock::special_connect(char const *host,int /*port*/,bool nonblocking)
 
 			return do_shared_port_local_connect( shared_port_id, nonblocking, sharedPortIP );
 		}
+
 	}
 
 		// Set shared port id even if it is null so we clear whatever may
@@ -1121,6 +1122,7 @@ ReliSock::sendTargetSharedPortID()
 		return true;
 	}
 	SharedPortClient shared_port;
+	shared_port.setSessionID(m_session_id);
 	return shared_port.sendSharedPortID(shared_port_id,this);
 }
 

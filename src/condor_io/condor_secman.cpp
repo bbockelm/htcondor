@@ -1437,6 +1437,34 @@ SecMan::LookupNonExpiredSession(char const *session_id, KeyCacheEntry *&session_
 	return true;
 }
 
+std::string
+SecMan::GetSessionId(const std::string &addr, int cmd, const std::string &hint)
+{
+	MyString sid;
+
+	sid = hint;
+	if (!sid.empty()) {
+		KeyCacheEntry *enc_key = nullptr;
+		bool have_session = LookupNonExpiredSession(sid.c_str(), enc_key);
+		if (have_session) {
+			return sid;
+		}
+		dprintf(D_SECURITY, "Ignoring requested session, because it does not exist: %s\n", sid.c_str());
+	}
+
+	const std::string &tag = SecMan::getTag();
+	std::string session_key;
+	if (tag.size()) {
+		formatstr(session_key, "{%s,%s,<%i>}", tag.c_str(), addr.c_str(), cmd);
+	} else {
+		formatstr(session_key, "{%s,<%i>}", addr.c_str(), cmd);
+	}
+	bool found_map_ent = command_map.lookup(session_key, sid) == 0;
+	if (found_map_ent) return sid;
+
+	return "";
+}
+
 StartCommandResult
 SecManStartCommand::sendAuthInfo_inner()
 {

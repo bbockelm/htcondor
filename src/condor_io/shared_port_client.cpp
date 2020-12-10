@@ -145,10 +145,16 @@ SharedPortClient::sendSharedPortID(char const *shared_port_id,Sock *sock)
 	}
 
 		// for possible future use
-	int more_args = 0;
+	int more_args = 1;
 	if (!sock->put(more_args)) {
 		dprintf(D_ALWAYS, "SharedPortClient: failed to more args to %s\n", 
 				sock->peer_description());
+		return false;
+	}
+
+	if (!sock->put(m_session_id)) {
+		dprintf(D_ALWAYS, "SharedPortClient: failed to send session ID hint to %s\n",
+			sock->peer_description());
 		return false;
 	}
 

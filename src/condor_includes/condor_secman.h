@@ -290,6 +290,10 @@ public:
 		// session, the lingering session will simply be replaced.
 	bool SetSessionLingerFlag(char const *session_id);
 
+		// Given a destination address and a command integer, fetch the
+		// corresponding session ID; returns an empty string if there is none.
+	std::string GetSessionId(const std::string &addr, int command_int, const std::string &hint);
+
  private:
 	void invalidateOneExpiredCache(KeyCache *session_cache);
 	static  std::string		filterAuthenticationMethods(DCpermission perm, const std::string &input_methods);

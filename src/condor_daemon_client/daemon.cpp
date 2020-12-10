@@ -476,7 +476,7 @@ Daemon::rewindCmList()
 //////////////////////////////////////////////////////////////////////
 
 ReliSock*
-Daemon::reliSock( int timeout, time_t deadline, CondorError* errstack, bool non_blocking, bool ignore_timeout_multiplier )
+Daemon::reliSock( int timeout, time_t deadline, CondorError* errstack, bool non_blocking, bool ignore_timeout_multiplier, int command_int, const char *sec_session_id )
 {
 	if( !checkAddr() ) {
 			// this already deals w/ _error for us...
@@ -485,6 +485,9 @@ Daemon::reliSock( int timeout, time_t deadline, CondorError* errstack, bool non_
 	ReliSock* sock;
 	sock = new ReliSock();
 
+	if (command_int >= 0) {
+		sock->set_session_id(_sec_man.GetSessionId(_addr, command_int, sec_session_id));
+	}
 	sock->set_deadline( deadline );
 
 	if( !connectSock(sock,timeout,errstack,non_blocking,ignore_timeout_multiplier) )
@@ -573,11 +576,11 @@ Daemon::startCommand_internal( const SecMan::StartCommandRequest &req, int timeo
 Sock *
 Daemon::makeConnectedSocket( Stream::stream_type st,
 							 int timeout, time_t deadline,
-							 CondorError* errstack, bool non_blocking )
+							 CondorError* errstack, bool non_blocking, int command_int, const char *sec_session_id )
 {
 	switch( st ) {
 	case Stream::reli_sock:
-		return reliSock(timeout, deadline, errstack, non_blocking);
+		return reliSock(timeout, deadline, errstack, non_blocking, false, command_int, sec_session_id);
 	case Stream::safe_sock:
 		return safeSock(timeout, deadline, errstack, non_blocking);
 	default: break;
@@ -605,7 +608,7 @@ Daemon::startCommand( int cmd, Stream::stream_type st,Sock **sock,int timeout, C
 		dprintf (D_COMMAND, "Daemon::startCommand(%s,...) making connection to %s\n", getCommandStringSafe(cmd), addr ? addr : "NULL");
 	}
 
-	*sock = makeConnectedSocket(st,timeout,0,errstack,nonblocking);
+	*sock = makeConnectedSocket(st, timeout, 0, errstack, nonblocking,cmd, sec_session_id);
 	if( ! *sock ) {
 		if ( callback_fn ) {
 			(*callback_fn)( false, NULL, errstack, "", false, misc_data );

@@ -24,6 +24,8 @@
 
 #include "daemon_command.h"
 
+time_t SharedPortServer::m_start_time = time(NULL);
+
 SharedPortServer::SharedPortServer():
 	m_registered_handlers(false),
 	m_publish_addr_timer(-1)
@@ -58,12 +60,26 @@ SharedPortServer::InitAndReconfig() {
 			ALLOW );
 		ASSERT( rc >= 0 );
 
+		rc = daemonCore->Register_Command(
+			SHARED_PORT_LOADBALANCE,
+			"SHARED_PORT_LOADBALANCE",
+			(CommandHandlercpp)&SharedPortServer::HandleLoadBalance,
+			"SharedPortServer::HandleLoadBalance",
+			this,
+			DAEMON );
+		ASSERT( rc >= 0 );
+
 		rc = daemonCore->Register_UnregisteredCommandHandler(
 			(CommandHandlercpp)&SharedPortServer::HandleDefaultRequest,
 			"SharedPortServer::HandleDefaultRequest",
 			this,
 			true);
 		ASSERT( rc >= 0 );
+
+                m_bookkeep_id = daemonCore->Register_Timer(10, 10,
+                        (TimerHandlercpp)&SharedPortServer::BookkeepSessions,
+			"SharedPortServer::BookkeepSessions", this);
+		ASSERT( m_bookkeep_id >= 0 );
 	}
 
 	param(m_default_id, "SHARED_PORT_DEFAULT_ID");
@@ -166,6 +182,54 @@ SharedPortServer::PublishAddress()
 }
 
 int
+SharedPortServer::HandleLoadBalance(int, Stream *sock)
+{
+	sock->decode();
+
+	ClassAd msg;
+	if (!getClassAd(sock, msg) || !sock->end_of_message()) {
+		dprintf(D_ALWAYS,
+			"SharedPortServer: failed to receive load balancer registration"
+			" from %s.\n", sock->peer_description());
+		return false;
+	}
+
+	ClassAd resp;
+
+	std::string requested_id;
+	if (!msg.EvaluateAttrString("LoadBalancerId", requested_id)) {
+		resp.InsertAttr(ATTR_ERROR_CODE, 1);
+		resp.InsertAttr(ATTR_ERROR_STRING, "Load balance request was missing a requested ID");
+		sock->encode();
+		if (!putClassAd(sock, resp) || !sock->end_of_message()) {
+			dprintf(D_FULLDEBUG,
+				"SharedPortServer: failed to send response to load balance client"
+				" at %s.\n", sock->peer_description());
+			return false;
+		}
+		return true;
+	}
+	int cookie;
+	if (!msg.EvaluateAttrInt("Cookie", cookie)) {
+		resp.InsertAttr(ATTR_ERROR_CODE, 2);
+		resp.InsertAttr(ATTR_ERROR_STRING, "Load balance request was missing a cookie");
+		sock->encode();
+		if (!putClassAd(sock, resp) || !sock->end_of_message()) {
+			dprintf(D_FULLDEBUG,
+				"SharedPortServer: failed to send response to load balance client"
+				" at %s.\n", sock->peer_description());
+			return false;
+		}
+	}
+
+	//auto iter = m_dest_map.find(requested_id);
+	//if (iter == m_dest_map.end())
+	dprintf(D_FULLDEBUG, "SharedPortServer: TODO - finish registration of LB");
+
+	return false;
+}
+
+int
 SharedPortServer::HandleConnectRequest(int,Stream *sock)
 {
 	sock->decode();
@@ -173,6 +237,10 @@ SharedPortServer::HandleConnectRequest(int,Stream *sock)
 		// to avoid possible D-O-S attacks, we read into fixed-length buffers
 	char shared_port_id[512];
 	char client_name[512];
+		// Session ID provides a hint to the load-balancer as connections
+		// belonging to the same security session must go to the same backend.
+	char client_session_id[512];
+	client_session_id[0] = '\0';
 	int deadline = 0;
 	int more_args = 0;
 
@@ -191,6 +259,15 @@ SharedPortServer::HandleConnectRequest(int,Stream *sock)
 		dprintf(D_ALWAYS,
 				"SharedPortServer: got invalid more_args=%d.\n", more_args);
 		return FALSE;
+	}
+
+		// Client has sent a hint about their session ID.
+	if (more_args == 1) {
+		more_args--;
+		if (!sock->get(client_session_id, sizeof(client_session_id))) {
+			dprintf(D_ALWAYS, "SharedPortServer: failed to receive client ID from %s.\n", sock->peer_description());
+			return false;
+		}
 	}
 
 		// for possible future use
@@ -227,6 +304,16 @@ SharedPortServer::HandleConnectRequest(int,Stream *sock)
 
 		if( IsDebugLevel( D_NETWORK ) ) {
 			deadline_desc.formatstr(" (deadline %ds)", deadline);
+		}
+	}
+
+		// Only execute this if a load balancer exists to avoid a hash
+		// table lookup in the non-load-balancer case.
+	if (m_load_balancer_count && client_session_id[0]) {
+		if (!GetLoadBalancerId(shared_port_id, client_name, client_session_id, shared_port_id)) {
+			dprintf(D_ALWAYS, "SharedPortServer: failed to assign client %s to a load balancer.\n",
+				sock->peer_description());
+			return false;
 		}
 	}
 
@@ -309,6 +396,70 @@ SharedPortServer::PassRequest(Sock *sock, const char *shared_port_id)
 	return result;
 }
 
+bool
+SharedPortServer::GetLoadBalancerId(const char *requested_id, const char *client_name, const char *sess_id, char *dest_shared_id)
+{
+	std::string requested_str;
+	BalancerInfo *bal;
+	{
+		const auto iter = m_dest_map.find(std::string(requested_id));
+		if (iter == m_dest_map.end()) {
+			strcpy(dest_shared_id, requested_id);
+			return true;
+		}
+		bal = &(iter->second);
+	}
+
+	std::size_t id = std::hash<std::string>{}(client_name) ^ (std::hash<std::string>{}(sess_id) << 1);
+	const auto iter = m_sessions.find(id);
+	if (iter == m_dests.end()) {
+		static const uint16_t lease_duration = 3600;
+		static const uint32_t session_duration = 86400;
+			// Note this will overflow if the shared_port server is alive for more than 136 years.
+		uint32_t expiry = static_cast<uint32_t>(time(NULL) - m_start_time) + session_duration;
+
+		uint16_t dest_id;
+		int idx;
+		for (idx=0; idx<10; idx++) {
+			int selection = get_random_int_insecure();
+			dest_id = static_cast<uint16_t>(selection % bal->size());
+			const auto &dest = bal->m_dests[dest_id];
+			if (dest.m_active) {
+				strcpy(dest_shared_id, dest.m_shared_port_id.c_str());
+				break;
+			}
+		}
+			// We give up on random selection - just take the next active ID.
+			// This will bias the resulting load balancer selection but we don't
+			// care because this seems statistically unlikely.
+		if (idx == 10) {
+			uint16_t orig_dest_id;
+			while (true) {
+				dest_id++;
+				dest_id = dest_id % bal->size();
+				if (orig_dest_id == dest_id) {
+					dprintf(D_ALWAYS, "SharedPortServer: Logic error - invalid load balancer setup.\n");
+					return false;
+				}
+				const auto &dest = bal->m_dests[dest_id];
+				if (dest.m_active) {
+					strcpy(dest_shared_id, dest.m_shared_port_id.c_str());
+					break;
+				}
+			}
+		}
+
+		m_dests.emplace(std::make_pair<std::size_t, BalancerInfo>(id, {dest_id, lease_duration, expiry}))
+        } else {
+		// Existing session; use the same load balancer.
+		const auto &dest_info = bal->m_dests[dest_id];
+		static const uint32_t lease_duration = 3600;
+		iter->second.m_lease_remaining = lease_duration;
+		strcpy(dest_shared_id, dest.m_shared_port_id.c_str());
+	}
+	return true;
+}
+
 int
 SharedPortServer::HandleDefaultRequest(int cmd,Stream *sock)
 {
@@ -320,4 +471,9 @@ SharedPortServer::HandleDefaultRequest(int cmd,Stream *sock)
 	dprintf(D_FULLDEBUG, "SharedPortServer: Passing a request from %s for command %d to ID %s.\n",
 		sock->peer_description(), cmd, m_default_id.c_str()); 
 	return PassRequest(static_cast<Sock*>(sock), m_default_id.c_str());
+}
+
+void
+SharedPortServer::BookkeepSessions()
+{
 }

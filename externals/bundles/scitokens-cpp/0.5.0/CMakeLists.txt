@@ -106,9 +106,12 @@ if (WITH_SCITOKENS)
 
 		find_path( SCITOKENS_INCLUDE_DIRS NAMES "scitokens/scitokens.h"
 			PATHS $ENV{SCITOKENS_DIR}/include ${SCITOKENS_DIR}/include )
-		find_library( SCITOKENS_FOUND "SciTokens"
-			HINTS $ENV{SCITOKENS_DIR} ${SCITOKENS_DIR}
-			PATH_SUFFIXES lib )
+		message (STATUS "SCITOKENS_INCLUDE_DIRS: ${SCITOKENS_INCLUDE_DIRS}")
+		find_library( SCITOKENS_FOUND NAMES "SciTokens"
+			HINTS $ENV{SCITOKENS_DIR} ${SCITOKENS_DIR} /usr
+			PATH_SUFFIXES lib lib64
+			REQUIRED )
+		message (STATUS "Value of SciTokens: ${SCITOKENS_FOUND}")
 		if (LINUX AND SCITOKENS_FOUND )
 			find_so_name( SCITOKENS_SO ${SCITOKENS_FOUND} )
 		endif()

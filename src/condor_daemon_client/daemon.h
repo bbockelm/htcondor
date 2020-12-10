@@ -271,7 +271,9 @@ public:
 		  */
 	ReliSock* reliSock( int timeout = 0, time_t deadline = 0,
 						CondorError* errstack = 0, bool non_blocking = false,
-						bool ignore_timeout_multiplier = false );
+						bool ignore_timeout_multiplier = false,
+						int command_int = -1,
+						const char *sec_session_id = nullptr );
 
 		/**	Create a new SafeSock object, connected to the daemon.
 		  Callers can optionally specify a timeout to use for the
@@ -296,7 +298,9 @@ public:
 	Sock *makeConnectedSocket( Stream::stream_type st = Stream::reli_sock,
 							   int timeout = 0, time_t deadline = 0,
 							   CondorError* errstack = NULL,
-							   bool non_blocking = false );
+							   bool non_blocking = false,
+							   int command_int = -1,
+							   const char *sec_session_id = nullptr);
 
 		/**	Connects a socket to the daemon.
 		  Callers can optionally specify a timeout to use for the
