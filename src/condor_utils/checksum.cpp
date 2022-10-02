@@ -33,38 +33,48 @@
 
 
 bool
-compute_sha256_checksum( int fd, std::string & checksum ) {
+compute_sha256_checksum(int fd, std::string & checksum, CondorError &err) {
     const size_t BUF_SIZ = 1024 * 1024;
-    unsigned char * buffer = (unsigned char *)calloc(BUF_SIZ, 1);
-    ASSERT( buffer != NULL );
+    std::unique_ptr<unsigned char, decltype(free)>
+        buffer((unsigned char *)calloc(BUF_SIZ, 1), &free);
+    ASSERT(buffer);
 
-    EVP_MD_CTX * context = condor_EVP_MD_CTX_new();
-    if( context == NULL ) { free(buffer) ; return false; }
-    if(! EVP_DigestInit_ex( context, EVP_sha256(), NULL )) {
-        condor_EVP_MD_CTX_free( context );
-        free(buffer);
+    std::unique_ptr<EVP_MD_CTX, decltype(condor_EVP_MD_CTX_free)>
+        context(condor_EVP_MD_CTX_new(), condor_EVP_MD_CTX_free);
+
+    if (!context || !buffer) {
+        err.push("SHA256_CHECKSUM", 1, "Failed to allocate checksum buffers");
+        return false;
+    }
+    if (!EVP_DigestInit_ex(context.get(), EVP_sha256(), NULL)) {
+	err.push("SHA256_CHECKSUM", 1, "Failed to initialize SHA256 checksum object");
         return false;
     }
 
-    // FIXME: This doesn't handle EAGAIN, but really should.  Look at
-    // full_read(), instead.
-    ssize_t bytesRead = read( fd, buffer, BUF_SIZ );
-    while( bytesRead > 0 ) {
-        EVP_DigestUpdate( context, buffer, bytesRead );
-        memset( buffer, 0, BUF_SIZ );
-        bytesRead = read( fd, buffer, BUF_SIZ );
+    ssize_t bytesRead = full_read(fd, buffer.get(), BUF_SIZ);
+        // Per OpenSSL docs: return 1 for success and 0 for failure
+    int digest_result = 1;
+    while (bytesRead > 0) {
+        if (0 == (digest_result = EVP_DigestUpdate(context.get(), buffer.get(), bytesRead))) {
+            break;
+        }
+        bytesRead = full_read(fd, buffer.get(), BUF_SIZ);
     }
-    free(buffer); buffer = NULL;
+    if (bytesRead < 0) {
+        err.pushf("SHA256_CHECKSUM", 2, "Failure when reading checksum input: %s (errno=%d)",
+            strerror(errno), errno);
+        return false;
+    }
+    if (digest_result == 0) {
+        err.push("SHA256_CHECKSUM", 3, "Failure when computing SHA256 digest");
+        return false;
+    }
 
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    memset( hash, 0, sizeof(hash) );
-    if(! EVP_DigestFinal_ex( context, hash, NULL )) {
-        condor_EVP_MD_CTX_free( context );
+    if (!EVP_DigestFinal_ex(context, hash, NULL)) {
+        err.push("SHA256_CHECKSUM", 4, "Failure when finalizing the SHA256 digest");
         return false;
     }
-    condor_EVP_MD_CTX_free( context );
-
-    if( bytesRead == -1 ) { return false; }
 
     AWSv4Impl::convertMessageDigestToLowercaseHex(
         hash, SHA256_DIGEST_LENGTH, checksum
@@ -72,11 +82,16 @@ compute_sha256_checksum( int fd, std::string & checksum ) {
     return true;
 }
 
+
 bool
-compute_file_sha256_checksum( const std::string & file_name, std::string & checksum ) {
-    int fd = safe_open_wrapper_follow( file_name.c_str(), O_RDONLY | O_LARGEFILE | _O_BINARY, 0 );
-    if( fd < 0 ) { return false; }
-    bool rv = compute_sha256_checksum( fd, checksum );
-    close(fd); fd = -1;
+compute_file_sha256_checksum(const std::string & file_name, std::string & checksum, CondorError &err) {
+    auto fd = safe_open_wrapper_follow(file_name.c_str(), O_RDONLY | O_LARGEFILE | _O_BINARY, 0);
+    if (fd < 0) {
+        err.pushf("SHA256_CHECKSUM", 5, "Failed to open '%s' for checksum: %s (errno=%d)",
+            file_name.c_str(), strerror(errno), errno);
+        return false;
+    }
+    auto rv = compute_sha256_checksum(fd, checksum);
+    close(fd);
     return rv;
 }

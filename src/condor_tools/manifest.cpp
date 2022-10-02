@@ -77,7 +77,8 @@ main( int argc, char ** argv ) {
         return 0;
     } else if( function == "compute_file_sha256_checksum" ) {
         std::string checksum;
-        bool ok = compute_file_sha256_checksum( argument, checksum );
+        CondorError err;
+        bool ok = compute_file_sha256_checksum( argument, checksum, err );
         if( ok ) {
             fprintf( stdout, "%s *%s\n", checksum.c_str(), argument.c_str() );
         }

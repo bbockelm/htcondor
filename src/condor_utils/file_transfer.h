@@ -414,6 +414,7 @@ class FileTransfer final: public Service {
 	bool PeerDoesXferInfo{false};
 	bool PeerDoesReuseInfo{false};
 	bool PeerDoesS3Urls{false};
+	bool PeerDoesChecksums{false};
 	bool TransferUserLog{false};
 	char* Iwd{nullptr};
 	StringList* ExceptionFiles{nullptr};
@@ -619,6 +620,10 @@ class FileTransfer final: public Service {
 		// and report them when it is reasonable to generate a hold message for the
 		// user.
 	CondorError m_reuse_info_err;
+
+		// Similar to above but for the generic checksum mechanism.
+	std::vector<ReuseInfo> m_checksum_info;
+	CondorError m_checksum_info_err;
 
 	// Parse the contents of a data manifest file for data reuse.
 	// Returns true on success; false otherwise.  In the case of a failure, the

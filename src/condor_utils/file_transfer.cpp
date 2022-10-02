@@ -99,7 +99,8 @@ enum class TransferSubCommand {
 	Unknown = -1,
 	UploadUrl = 7,
 	ReuseInfo = 8,
-	SignUrls = 9
+	SignUrls = 9,
+	ChecksumFile = 10
 };
 
 #define COMMIT_FILENAME ".ccommit.con"
@@ -418,6 +419,8 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 	}
 	m_reuse_info.clear();
 	m_reuse_info_err.clear();
+	m_checksum_info.clear();
+	m_checksum_info_err.clear();
 
 	// Set InputFiles to be ATTR_TRANSFER_INPUT_FILES plus
 	// ATTR_JOB_INPUT, ATTR_JOB_CMD, and ATTR_ULOG_FILE if simple_init.
@@ -474,6 +477,9 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 		}
 		if (!ParseDataManifest()) {
 			m_reuse_info.clear();
+		}
+		if (!ParseChecksumManifest()) {
+			m_checksum_info.clear();
 		}
 			// If we need to reuse data to the worker, we might also benefit from
 			// not spooling when reuse is an option.
@@ -2771,6 +2777,31 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 				}
 				s->decode();
 				continue;
+			} else if (subcommand == TransferSubCommand::ChecksumFile) {
+
+				std::string checksum_type;
+				std::string checksum;
+				if (!file_info->EvaluateAttrString("ChecksumType", checksum_type)) {
+					errstack.push("CHECKSUM_FILE", 1, "Checksum command did not provide checksum type.");
+					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+					rc = GET_FILE_CHECKSUM_FAILED;
+				}
+				else if (checksum_type != "sha256") {
+					errstack.pushf("CHECKSUM_FILE", 2, "Checksum command requested unsupported checksum type '%s'.",
+						checksum_type.c_str());
+					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+					rc = GET_FILE_CHECKSUM_FAILED;
+				else if (!file_info->EvaluateAttrString("Checksum", checksum)) {
+					errstack.push("CHECKSUM_FILE", 3, "Checksum command did not provide checksum type.");
+					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+					rc = GET_FILE_CHECKSUM_FAILED;
+				}
+				else if (!compute_file_sha256_checksum(fullname.c_str(), checksum, errstack)) {
+					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+					rc = GET_FILE_CHECKSUM_FAILED;
+				} else {
+					rc = 0; // All good!
+				}
 			} else {
 				// unrecongized subcommand
 				dprintf(D_ALWAYS, "FILETRANSFER: unrecognized subcommand %i! skipping!\n", static_cast<int>(subcommand));
@@ -3762,6 +3793,80 @@ FileTransfer::InvokeMultiUploadPlugin(const std::string &pluginPath, const std::
 }
 
 
+namespace {
+
+ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
+	const std::string &tag, std::vector<ReuseInfo> &checksum_info, CondorError &err)
+{
+	std::unique_ptr<FILE, decltype(&fclose)>
+	manifest(safe_fopen_wrapper_follow(checksum_info_filename.c_str(), "r"), fclose);
+	if (!manifest.get()) {
+		dprintf(D_ALWAYS, "%s: Failed to open SHA256 manifest %s: %s.\n",
+			err_name.c_str(), checksum_info.c_str(), strerror(errno));
+		err.pushf(err_name.c_str(), 1, "Failed to open SHA256 manifest %s: %s.", checksum_info.c_str(), strerror(errno));
+		return false;
+	}
+	int lineno = 0;
+	for (std::string line; readLine(line, manifest.get(), false);) {
+		lineno++;
+		if (!line[0] || line[0] == '\n' || line[0] == '#') {
+			continue;
+		}
+		StringList sl(line.c_str());
+		sl.rewind();
+		const char *cksum = sl.next();
+		if (cksum == nullptr) {
+			dprintf(D_ALWAYS, "%s: Invalid manifest line: %s (line #%d)\n",
+				err_name.c_str(), line.c_str(), lineno);
+			err.pushf(err_name.c_str(), 2, "Invalid manifest line: %s (line #%d)", line.c_str(), lineno);
+			return false;
+		}
+		const char *fname = sl.next();
+		if (fname == nullptr) {
+			dprintf(D_ALWAYS, "%s: Invalid manifest file line (missing name): %s (line #%d)\n",
+				err_name.c_str(), line.c_str(), lineno);
+			err.pushf(err_name.c_str(), 3, "Invalid manifest file line (missing name): %s (line #%d)",
+				line.c_str(), lineno);
+			return false;
+		}
+			// NOTE: manifest files output from sha256sum don't include a file size;
+			// requiring a size here is disappointing because that means the user can't
+			// use sha256sum directly.  Can be addressed in two ways:
+			//   - stat()'ing the file on the submit sided, then
+			//   - falling back to requiring this column (for URLs; we can't stat them).
+		const char *size_str = sl.next();
+		long long bytes_long;
+		if (size_str == nullptr) {
+			if (IsUrl(fname)) {
+				dprintf(D_ALWAYS, "%s: Invalid manifest file line (missing size for URL): %s (line #%d)\n",
+					err_name.c_str(), line.c_str(), lineno);
+				err.pushf(err_name.c_str(), 4, "Invalid manifest file line (missing size for URL): %s (line #%d)",
+					line.c_str(), lineno);
+				return false;
+			}
+			struct stat statbuf;
+			if (-1 == stat(fname, &statbuf)) {
+				err.pushf(err_name.c_str(), 5, "Unable to get size of file %s in data manifest: %s (line #%d)",
+					fname, strerror(errno), lineno);
+				return false;
+			}
+			bytes_long = statbuf.st_size;
+		} else {
+			try {
+				bytes_long = std::stoll(size_str);
+			} catch (...) {
+				err.pushf(err_name.c_str(), 6, "Invalid size in manifest file line: %s (line #%d)", line.c_str(), lineno);
+				return false;
+			}
+		}
+		checksum_info.emplace_back(fname, cksum, "sha256", tag, bytes_long);
+	}
+	return true;
+}
+
+}
+
+
 bool
 FileTransfer::ParseDataManifest()
 {
@@ -3776,68 +3881,27 @@ FileTransfer::ParseDataManifest()
 		tag = "";
 	}
 
+
 	std::string checksum_info;
 	if (!jobAd.EvaluateAttrString("DataReuseManifestSHA256", checksum_info))
 	{
 		return true;
 	}
-	std::unique_ptr<FILE, decltype(&fclose)>
-	manifest(safe_fopen_wrapper_follow(checksum_info.c_str(), "r"), fclose);
-	if (!manifest.get()) {
-		dprintf(D_ALWAYS, "ParseDataManifest: Failed to open SHA256 manifest %s: %s.\n", checksum_info.c_str(), strerror(errno));
-		err.pushf("ParseDataManifest", 1, "Failed to open SHA256 manifest %s: %s.", checksum_info.c_str(), strerror(errno));
-		return false;
+	return ParseManifestHelper(checksum_info, "ParseDataManifest", tag, m_reuse_info, err);
+}
+
+
+bool
+FileTransfer::ParseChecksumInfo()
+{
+	CondorError &err = m_checksum_info_err; err.clear();
+
+	std::string checksum_info;
+	if (!jobAd.EvaluateAttrString("TransferInputManifestSHA256", checksum_info))
+	{
+		return true;
 	}
-	int lineno = 0;
-	for (std::string line; readLine(line, manifest.get(), false);) {
-		lineno++;
-		if (!line[0] || line[0] == '\n' || line[0] == '#') {
-			continue;
-		}
-		StringList sl(line.c_str());
-		sl.rewind();
-		const char *cksum = sl.next();
-		if (cksum == nullptr) {
-			dprintf(D_ALWAYS, "ParseDataManifest: Invalid manifest line: %s (line #%d)\n", line.c_str(), lineno);
-			err.pushf("ParseDataManifest", 2, "Invalid manifest line: %s (line #%d)", line.c_str(), lineno);
-			return false;
-		}
-		const char *fname = sl.next();
-		if (fname == nullptr) {
-			dprintf(D_ALWAYS, "ParseDataManifest: Invalid manifest file line (missing name): %s (line #%d)\n", line.c_str(), lineno);
-			err.pushf("ParseDataManifest", 3, "Invalid manifest file line (missing name): %s (line #%d)", line.c_str(), lineno);
-			return false;
-		}
-			// NOTE: manifest files output from sha256sum don't include a file size;
-			// requiring a size here is disappointing because that means the user can't
-			// use sha256sum directly.  Can be addressed in two ways:
-			//   - stat()'ing the file on the submit sided, then
-			//   - falling back to requiring this column (for URLs; we can't stat them).
-		const char *size_str = sl.next();
-		long long bytes_long;
-		if (size_str == nullptr) {
-			if (IsUrl(fname)) {
-				dprintf(D_ALWAYS, "ParseDataManifest: Invalid manifest file line (missing size for URL): %s (line #%d)\n", line.c_str(), lineno);
-				err.pushf("ParseDataManifest", 4, "Invalid manifest file line (missing size for URL): %s (line #%d)", line.c_str(), lineno);
-				return false;
-			}
-			struct stat statbuf;
-			if (-1 == stat(fname, &statbuf)) {
-				err.pushf("ParseDataManifest", 5, "Unable to get size of file %s in data manifest: %s (line #%d)", fname, strerror(errno), lineno);
-				return false;
-			}
-			bytes_long = statbuf.st_size;
-		} else {
-			try {
-				bytes_long = std::stoll(size_str);
-			} catch (...) {
-				err.pushf("ParseDataManifest", 6, "Invalid size in manifest file line: %s (line #%d)", line.c_str(), lineno);
-				return false;
-			}
-		}
-		m_reuse_info.emplace_back(fname, cksum, "sha256", tag, bytes_long);
-	}
-	return true;
+	return ParseManifestHelper(checksum_info, "TransferInputManifestSHA256", "", m_checksum_info, err);
 }
 
 
@@ -3909,7 +3973,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 
 	priv_state saved_priv = PRIV_UNKNOWN;
 	if( want_priv_change ) {
-		saved_priv = set_priv( desired_priv_state );
+		/vsaved_priv = set_priv( desired_priv_state );
 	}
 
 	// Aggregate multiple file uploads; we will upload them all at once
@@ -4147,6 +4211,24 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 		}
 	}
 
+	std::unordered_map<std::string, const ReuseInfo *> checksum_map;
+	if (!m_checksum_info.empty() && PeerDoesChecksums)
+	{
+		dprintf(D_FULLDEBUG, "DoUpload: Will verify up to %d transfferred files.\n", m_checksum_info.size());
+
+		// For now, an O(N^2) loop to find all the files we should checksum.
+		for (const auto &xfer : filelist)
+		{
+			for (const auto &checksum : m_checksum_info) {
+
+				if (fileitem.srcName() == checksum.filename()) {
+					checksum_map.push_back(std::pair<std::string, const ReuseInfo *>
+						(checksum.filename(), &checksum));
+				}
+			}
+		}
+	}
+
 	std::unordered_map<std::string, std::string> s3_url_map;
 	if (!s3_urls_to_sign.empty()) {
 		dprintf(D_FULLDEBUG, "DoUpload: Requesting %zu URLs to sign.\n", s3_urls_to_sign.size());
@@ -4296,6 +4378,11 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 
 		auto &filename = fileitem.srcName();
 		auto &dest_dir = fileitem.destDir();
+
+		auto iter = checksum_map.find(filename);
+		bool should_send_checksum = false; // Indicates that the transfer command could utilize a checksum.
+			// If non-null, this indicates there's a checksum available to send.
+		const ReuseInfo *item_checksum_info = (iter == checksum_map.end()) ? nullptr : iter->second;
 
 			// Anything the remote side was able to reuse we do not send again.
 		if (skip_files.find(filename) != skip_files.end()) {
@@ -4648,6 +4735,11 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 					ClassAd xfer_ad;
 					xfer_ad.InsertAttr( "Url", local_output_url );
 					xfer_ad.InsertAttr( "LocalFileName", fullname );
+					if (checksum_map) {
+						xfer_ad.InsertAttr("Checksum", info.checksum());
+						xfer_ad.InsertAttr("ChecksumType", info.checksum_type());
+						xfer_ad.InsertAttr("Size", static_cast<long long>(info.size()));
+					}
 					std::string xfer_str;
 					unparser.Unparse( xfer_str, &xfer_ad );
 
@@ -4736,6 +4828,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 				dprintf( D_FULLDEBUG, "DoUpload: sent fullname and NO eom: %s\n", UrlSafePrint(fullname));
 				rc = 0;
 			}
+			should_send_checksum = true;
 
 			// on the sending side, we don't know how many bytes the actual
 			// file was, since we aren't the ones downloading it.  to find out
@@ -4770,8 +4863,10 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 				errno = EISDIR;
 			}
 		} else if ( TransferFilePermissions ) {
+			should_send_checksum = true;
 			rc = s->put_file_with_permissions( &bytes, fullname.c_str(), this_file_max_bytes, &xfer_queue );
 		} else {
+			should_send_checksum = true;
 			rc = s->put_file( &bytes, fullname.c_str(), 0, this_file_max_bytes, &xfer_queue );
 		}
 		if( rc < 0 ) {
@@ -4861,6 +4956,34 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 			                    try_again,hold_code,hold_subcode,
 			                    error_desc.c_str(),__LINE__);
 			}
+			// If the transfer was successful, potentially ask the remote side to checksum it.
+		} else if (item_checksum_info && should_send_checksum) {
+
+				// Indicate a ClassAd-based command.
+			if (!s->snd_int(static_cast<int>(TransferCommand::Other), false) || !s->end_of_message()) {
+				dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n", __LINE__);
+				return_and_resetpriv(-1);
+			}
+				// Fake an empty filename.
+			if (!s->put("") || !s->end_of_message()) {
+				dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n", __LINE__);
+				return_and_resetpriv(-1);
+			}
+
+			ClassAd file_info;
+			auto sub = static_cast<int>(TransferSubCommand::ChecksumFile);
+			file_info.InsertAttr("SubCommand", sub);
+			file_info.InsertAttr("Checksum", item_checksum_info.checksum());
+			file_info.InsertAttr("ChecksumType", item_checksum_info.checksum_type());
+			file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info.size()));
+
+			if (!putClassAd(s, file_info) || !s->end_of_message()) {
+				dprintf(D_FULLDEBUG, "DoUpload: exiting at %d\n", __LINE__);
+				return_and_resetpriv(-1);
+			}
+
+			// We don't wait on the response; any errors are registered on the remote end
+			// and handled after all transfers are completed.
 		}
 
 		if( !currentUploadDeferred && !s->end_of_message() ) {
@@ -5577,6 +5700,7 @@ FileTransfer::setPeerVersion( const CondorVersionInfo &peer_version )
 
 	PeerDoesReuseInfo = peer_version.built_since_version(8,9,4);
 	PeerDoesS3Urls = peer_version.built_since_version(8,9,4);
+	PeerDoesChecksums = peer_version.built_since_version(10, 0, 0);
 }
 
 

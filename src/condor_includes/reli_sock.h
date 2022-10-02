@@ -56,6 +56,7 @@ class Condor_MD_MAC;
 #define PUT_FILE_PLUGIN_FAILED -4
 #define PUT_FILE_MAX_BYTES_EXCEEDED -5
 #define GET_FILE_MAX_BYTES_EXCEEDED -5
+#define GET_FILE_CHECKSUM_FAILED -6
 
 class BlockingModeGuard;
 

@@ -153,8 +153,9 @@ validateFilesListedIn(
 		std::string listedChecksum = manifest::ChecksumFromLine( manifestLine );
 
 		std::string computedChecksum;
-		if(! compute_file_sha256_checksum( file, computedChecksum )) {
-			formatstr( error, "Failed to open checkpoint file ('%s') to compute checksum.", file.c_str() );
+		CondorError err;
+		if(! compute_file_sha256_checksum( file, computedChecksum, err )) {
+			formatstr( error, "Failed to compute checksum for checkpoint file ('%s'): %s.", file.c_str(), err.getFullText().c_str() );
 			fclose(fp);
 			return false;
 		}
