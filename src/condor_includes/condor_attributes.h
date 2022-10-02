@@ -820,6 +820,7 @@
 #define ATTR_TRANSFER_OUTPUT  "TransferOut"
 #define ATTR_TRANSFER_ERROR  "TransferErr"
 #define ATTR_TRANSFER_INPUT_FILES  "TransferInput"
+#define ATTR_TRANSFER_INPUT_MANIFEST_SHA256 "TransferInputManifestSHA256"
 #define ATTR_TRANSFER_INPUT_REMAPS  "TransferInputRemaps"
 #define ATTR_TRANSFER_INPUT_STATS  "TransferInputStats"
 #define ATTR_TRANSFER_PLUGINS  "TransferPlugins"

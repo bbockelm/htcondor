@@ -28,6 +28,7 @@
 
 #include "manifest.h"
 #include "checksum.h"
+#include "CondorError.h"
 #include "stl_string_utils.h"
 #include "AWSv4-impl.h"
 #include "safe_fopen.h"

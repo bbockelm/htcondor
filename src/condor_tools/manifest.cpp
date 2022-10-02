@@ -28,6 +28,7 @@
 #include "manifest.h"
 #include "checksum.h"
 #include "shortfile.h"
+#include "CondorError.h"
 
 int
 usage( const char * argv0 ) {

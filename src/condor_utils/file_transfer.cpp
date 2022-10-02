@@ -50,6 +50,7 @@
 #include "AWSv4-impl.h"
 #include "condor_random_num.h"
 #include "condor_sys.h"
+#include "checksum.h"
 
 #include <fstream>
 #include <algorithm>
@@ -475,10 +476,16 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 			if (!InputFiles->file_contains(manifest_file.c_str()))
 				InputFiles->append(manifest_file.c_str());
 		}
+			// Also ensure we spoool the checksum file from the remote client.
 		if (!ParseDataManifest()) {
 			m_reuse_info.clear();
 		}
-		if (!ParseChecksumManifest()) {
+		if (jobAd.EvaluateAttrString("TransferInputManifestSHA256", manifest_file))
+		{
+			if (!InputFiles->file_contains(manifest_file.c_str()))
+				InputFiles->append(manifest_file.c_str());
+		}
+		if (!ParseChecksumInfo()) {
 			m_checksum_info.clear();
 		}
 			// If we need to reuse data to the worker, we might also benefit from
@@ -1690,6 +1697,9 @@ FileTransfer::HandleCommands(int command, Stream *s)
 			if (!transobject->ParseDataManifest()) {
 				transobject->m_reuse_info.clear();
 			}
+			if (!transobject->ParseChecksumInfo()) {
+				transobject->m_checksum_info.clear();
+			}
 			for (const auto &info : transobject->m_reuse_info) {
 				if (!transobject->InputFiles->file_contains(info.filename().c_str()))
 					transobject->InputFiles->append(info.filename().c_str());
@@ -2778,10 +2788,10 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 				s->decode();
 				continue;
 			} else if (subcommand == TransferSubCommand::ChecksumFile) {
-
+				dprintf(D_FULLDEBUG, "Will checksum file %s.\n", fullname.c_str());
 				std::string checksum_type;
 				std::string checksum;
-				if (!file_info->EvaluateAttrString("ChecksumType", checksum_type)) {
+				if (!file_info.EvaluateAttrString("ChecksumType", checksum_type)) {
 					errstack.push("CHECKSUM_FILE", 1, "Checksum command did not provide checksum type.");
 					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
 					rc = GET_FILE_CHECKSUM_FAILED;
@@ -2791,16 +2801,20 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 						checksum_type.c_str());
 					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
 					rc = GET_FILE_CHECKSUM_FAILED;
-				else if (!file_info->EvaluateAttrString("Checksum", checksum)) {
+				}
+				else if (!file_info.EvaluateAttrString("Checksum", checksum)) {
 					errstack.push("CHECKSUM_FILE", 3, "Checksum command did not provide checksum type.");
 					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
 					rc = GET_FILE_CHECKSUM_FAILED;
 				}
-				else if (!compute_file_sha256_checksum(fullname.c_str(), checksum, errstack)) {
-					dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
-					rc = GET_FILE_CHECKSUM_FAILED;
-				} else {
-					rc = 0; // All good!
+				else {
+					dprintf(D_FULLDEBUG, "Checksumming file %s; expected SHA256 %s.\n", fullname.c_str(), checksum.c_str());
+					if (!compute_file_sha256_checksum(fullname.c_str(), checksum, errstack)) {
+						dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+						rc = GET_FILE_CHECKSUM_FAILED;
+					} else {
+						rc = 0; // All good!
+					}
 				}
 			} else {
 				// unrecongized subcommand
@@ -3793,17 +3807,17 @@ FileTransfer::InvokeMultiUploadPlugin(const std::string &pluginPath, const std::
 }
 
 
-namespace {
-
-ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
-	const std::string &tag, std::vector<ReuseInfo> &checksum_info, CondorError &err)
+bool
+FileTransfer::ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
+	const std::string &tag, std::vector<FileTransfer::ReuseInfo> &checksum_info, CondorError &err)
 {
 	std::unique_ptr<FILE, decltype(&fclose)>
 	manifest(safe_fopen_wrapper_follow(checksum_info_filename.c_str(), "r"), fclose);
 	if (!manifest.get()) {
 		dprintf(D_ALWAYS, "%s: Failed to open SHA256 manifest %s: %s.\n",
-			err_name.c_str(), checksum_info.c_str(), strerror(errno));
-		err.pushf(err_name.c_str(), 1, "Failed to open SHA256 manifest %s: %s.", checksum_info.c_str(), strerror(errno));
+			err_name.c_str(), checksum_info_filename.c_str(), strerror(errno));
+		err.pushf(err_name.c_str(), 1, "Failed to open SHA256 manifest %s: %s.",
+			checksum_info_filename.c_str(), strerror(errno));
 		return false;
 	}
 	int lineno = 0;
@@ -3861,9 +3875,8 @@ ParseManifestHelper(const std::string &checksum_info_filename, const std::string
 		}
 		checksum_info.emplace_back(fname, cksum, "sha256", tag, bytes_long);
 	}
+	dprintf(D_FULLDEBUG, "A total of %lu checksums were loaded from file.\n", checksum_info.size());
 	return true;
-}
-
 }
 
 
@@ -3894,14 +3907,15 @@ FileTransfer::ParseDataManifest()
 bool
 FileTransfer::ParseChecksumInfo()
 {
-	CondorError &err = m_checksum_info_err; err.clear();
+	m_checksum_info_err.clear();
 
 	std::string checksum_info;
-	if (!jobAd.EvaluateAttrString("TransferInputManifestSHA256", checksum_info))
+	if (!jobAd.EvaluateAttrString(ATTR_TRANSFER_INPUT_MANIFEST_SHA256, checksum_info))
 	{
 		return true;
 	}
-	return ParseManifestHelper(checksum_info, "TransferInputManifestSHA256", "", m_checksum_info, err);
+	dprintf(D_FULLDEBUG, "Will use checksums from %s.\n", checksum_info.c_str());
+	return ParseManifestHelper(checksum_info, ATTR_TRANSFER_INPUT_MANIFEST_SHA256, "", m_checksum_info, m_checksum_info_err);
 }
 
 
@@ -3973,7 +3987,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 
 	priv_state saved_priv = PRIV_UNKNOWN;
 	if( want_priv_change ) {
-		/vsaved_priv = set_priv( desired_priv_state );
+		saved_priv = set_priv( desired_priv_state );
 	}
 
 	// Aggregate multiple file uploads; we will upload them all at once
@@ -4214,15 +4228,15 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 	std::unordered_map<std::string, const ReuseInfo *> checksum_map;
 	if (!m_checksum_info.empty() && PeerDoesChecksums)
 	{
-		dprintf(D_FULLDEBUG, "DoUpload: Will verify up to %d transfferred files.\n", m_checksum_info.size());
+		dprintf(D_FULLDEBUG, "DoUpload: Will verify up to %lu transferred files.\n", m_checksum_info.size());
 
 		// For now, an O(N^2) loop to find all the files we should checksum.
 		for (const auto &xfer : filelist)
 		{
 			for (const auto &checksum : m_checksum_info) {
 
-				if (fileitem.srcName() == checksum.filename()) {
-					checksum_map.push_back(std::pair<std::string, const ReuseInfo *>
+				if (xfer.srcName() == checksum.filename()) {
+					checksum_map.insert(std::pair<std::string, const ReuseInfo *>
 						(checksum.filename(), &checksum));
 				}
 			}
@@ -4379,10 +4393,13 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 		auto &filename = fileitem.srcName();
 		auto &dest_dir = fileitem.destDir();
 
-		auto iter = checksum_map.find(filename);
 		bool should_send_checksum = false; // Indicates that the transfer command could utilize a checksum.
 			// If non-null, this indicates there's a checksum available to send.
-		const ReuseInfo *item_checksum_info = (iter == checksum_map.end()) ? nullptr : iter->second;
+		const ReuseInfo *item_checksum_info;
+		{
+			auto iter = checksum_map.find(filename);
+			item_checksum_info = (iter == checksum_map.end()) ? nullptr : iter->second;
+		}
 
 			// Anything the remote side was able to reuse we do not send again.
 		if (skip_files.find(filename) != skip_files.end()) {
@@ -4735,10 +4752,10 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 					ClassAd xfer_ad;
 					xfer_ad.InsertAttr( "Url", local_output_url );
 					xfer_ad.InsertAttr( "LocalFileName", fullname );
-					if (checksum_map) {
-						xfer_ad.InsertAttr("Checksum", info.checksum());
-						xfer_ad.InsertAttr("ChecksumType", info.checksum_type());
-						xfer_ad.InsertAttr("Size", static_cast<long long>(info.size()));
+					if (item_checksum_info) {
+						xfer_ad.InsertAttr("Checksum", item_checksum_info->checksum());
+						xfer_ad.InsertAttr("ChecksumType", item_checksum_info->checksum_type());
+						xfer_ad.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
 					}
 					std::string xfer_str;
 					unparser.Unparse( xfer_str, &xfer_ad );
@@ -4958,6 +4975,14 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 			}
 			// If the transfer was successful, potentially ask the remote side to checksum it.
 		} else if (item_checksum_info && should_send_checksum) {
+				// Send EOM now; for the checksum, we'll send two commands per for-loop in order
+				// to have the file counts stay correct.
+			if (!s->end_of_message()) {
+				dprintf(D_FULLDEBUG,"DoUpload: socket communication failure; exiting at line %d\n",__LINE__);
+				return_and_resetpriv( -1 );
+			}
+
+			dprintf(D_FULLDEBUG, "Sending remote side a checksum command.\n");
 
 				// Indicate a ClassAd-based command.
 			if (!s->snd_int(static_cast<int>(TransferCommand::Other), false) || !s->end_of_message()) {
@@ -4965,7 +4990,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 				return_and_resetpriv(-1);
 			}
 				// Fake an empty filename.
-			if (!s->put("") || !s->end_of_message()) {
+			if (!s->put(dest_filename.c_str()) || !s->end_of_message()) {
 				dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n", __LINE__);
 				return_and_resetpriv(-1);
 			}
@@ -4973,11 +4998,12 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 			ClassAd file_info;
 			auto sub = static_cast<int>(TransferSubCommand::ChecksumFile);
 			file_info.InsertAttr("SubCommand", sub);
-			file_info.InsertAttr("Checksum", item_checksum_info.checksum());
-			file_info.InsertAttr("ChecksumType", item_checksum_info.checksum_type());
-			file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info.size()));
+			file_info.InsertAttr("Checksum", item_checksum_info->checksum());
+			file_info.InsertAttr("ChecksumType", item_checksum_info->checksum_type());
+			file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
 
-			if (!putClassAd(s, file_info) || !s->end_of_message()) {
+				// Note no EOM is sent here; it'll be sent outside the conditional.
+			if (!putClassAd(s, file_info)) {
 				dprintf(D_FULLDEBUG, "DoUpload: exiting at %d\n", __LINE__);
 				return_and_resetpriv(-1);
 			}
@@ -5700,7 +5726,7 @@ FileTransfer::setPeerVersion( const CondorVersionInfo &peer_version )
 
 	PeerDoesReuseInfo = peer_version.built_since_version(8,9,4);
 	PeerDoesS3Urls = peer_version.built_since_version(8,9,4);
-	PeerDoesChecksums = peer_version.built_since_version(10, 0, 0);
+	PeerDoesChecksums = peer_version.built_since_version(10, 1, 0);
 }
 
 

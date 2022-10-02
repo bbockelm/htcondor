@@ -1280,6 +1280,31 @@ FILE TRANSFER COMMANDS
     credentials for ``s3://`` or ``gs://`` file transfer; this implies
     that all such URLs download from or upload to the same service.
 
+    :index:`transfer_input_manifest_sha256<single: transfer_input_manifest_sha256; submit commands>`
+ transfer_input_manifest_sha256 = < filename >
+    Specifies a "manifest file" which contains the authoritative checksums
+    for the job's input files.  If an input file appears in the manifest and is
+    transfered by HTCondor then the HTCondor starter will compute the checksum and
+    fail the job startup (the job will be requeued, not held) if the checksum on disk
+    doesn't match the value in the manifest.
+
+    The manifest's format is identical to the output of ``sha256sum``; one line per
+    file with two columns, the SHA256 checksum followed by the filename.  An example
+    of a manifest file is:
+
+    .. code-block:: text
+
+        e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  file1.txt
+        db0f80b718259b1488a0b63ad9ea6ecb39806fb5f49c6dddaca8c3f5a134e211  file2.txt
+        2f92efe47639c6214e0059053ccd23e8552e92e6fe5d56ac8bfb9a5ea0331d74  file3.txt
+
+    Empty lines and lines beginning with a hash (``#``) are ignored.  Files appearing
+    in the manifest but not transferred through ``transfer_input_files`` are ignored.
+
+    The checksum manifest mechanism is intended to detect file corruptions in reference
+    datasets (due to storage issues at either source or destination), especially when
+    URL-based transfers are in use.
+
     :index:`transfer_output_files<single: transfer_output_files; submit commands>`
  transfer_output_files = < file1,file2,file... >
     This command forms an explicit list of output files and directories

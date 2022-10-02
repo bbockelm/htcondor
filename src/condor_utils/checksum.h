@@ -23,7 +23,7 @@
 #include <string>
 
 	// Forward decl
-class CondorError &;
+class CondorError;
 
 bool compute_sha256_checksum( int fd, std::string & checksum, CondorError &err );
 bool compute_file_sha256_checksum( const std::string & file_name, std::string & checksum, CondorError &err );

@@ -629,6 +629,16 @@ class FileTransfer final: public Service {
 	// Returns true on success; false otherwise.  In the case of a failure, the
 	// err object is filled in with an appropriate error message.
 	bool ParseDataManifest();
+
+	// Similar to ParseDataManifest, this parses a checksum info file provided by the
+	// user into a list of checksum info items and persisted within the
+	// m_checksum_info member.
+	bool ParseChecksumInfo();
+
+	// A helper function containing the common pieces between ParseDataManifest and
+	// ParseChecksumInfo
+	bool ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
+        const std::string &tag, std::vector<ReuseInfo> &checksum_info, CondorError &err);
 };
 
 // returns 0 if no expiration

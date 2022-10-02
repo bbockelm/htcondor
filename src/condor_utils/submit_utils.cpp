@@ -5082,6 +5082,7 @@ static const SimpleSubmitKeyword prunable_keywords[] = {
 	// formerly SetTransferFiles
 	{SUBMIT_KEY_MaxTransferInputMB, ATTR_MAX_TRANSFER_INPUT_MB, SimpleSubmitKeyword::f_as_expr},
 	{SUBMIT_KEY_MaxTransferOutputMB, ATTR_MAX_TRANSFER_OUTPUT_MB, SimpleSubmitKeyword::f_as_expr},
+	{SUBMIT_KEY_TransferInputManifestSHA256, ATTR_TRANSFER_INPUT_MANIFEST_SHA256, SimpleSubmitKeyword::f_as_string},
 
 	{SUBMIT_KEY_ManifestDesired, ATTR_JOB_MANIFEST_DESIRED, SimpleSubmitKeyword::f_as_bool},
 	{SUBMIT_KEY_ManifestDir, ATTR_JOB_MANIFEST_DIR, SimpleSubmitKeyword::f_as_string},

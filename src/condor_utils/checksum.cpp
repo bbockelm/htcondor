@@ -21,8 +21,9 @@
 #include "condor_debug.h"
 #include "condor_system.h"
 
-#include <string>
 #include <map>
+#include <memory>
+#include <string>
 
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -30,17 +31,18 @@
 
 #include "safe_open.h"
 #include "AWSv4-impl.h"
+#include "CondorError.h"
 
 
 bool
 compute_sha256_checksum(int fd, std::string & checksum, CondorError &err) {
     const size_t BUF_SIZ = 1024 * 1024;
-    std::unique_ptr<unsigned char, decltype(free)>
+    std::unique_ptr<unsigned char, decltype(&free)>
         buffer((unsigned char *)calloc(BUF_SIZ, 1), &free);
     ASSERT(buffer);
 
-    std::unique_ptr<EVP_MD_CTX, decltype(condor_EVP_MD_CTX_free)>
-        context(condor_EVP_MD_CTX_new(), condor_EVP_MD_CTX_free);
+    std::unique_ptr<EVP_MD_CTX, decltype(&condor_EVP_MD_CTX_free)>
+        context(condor_EVP_MD_CTX_new(), &condor_EVP_MD_CTX_free);
 
     if (!context || !buffer) {
         err.push("SHA256_CHECKSUM", 1, "Failed to allocate checksum buffers");
@@ -71,7 +73,7 @@ compute_sha256_checksum(int fd, std::string & checksum, CondorError &err) {
     }
 
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    if (!EVP_DigestFinal_ex(context, hash, NULL)) {
+    if (!EVP_DigestFinal_ex(context.get(), hash, NULL)) {
         err.push("SHA256_CHECKSUM", 4, "Failure when finalizing the SHA256 digest");
         return false;
     }
@@ -91,7 +93,7 @@ compute_file_sha256_checksum(const std::string & file_name, std::string & checks
             file_name.c_str(), strerror(errno), errno);
         return false;
     }
-    auto rv = compute_sha256_checksum(fd, checksum);
+    auto rv = compute_sha256_checksum(fd, checksum, err);
     close(fd);
     return rv;
 }
