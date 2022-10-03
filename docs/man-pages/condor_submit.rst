@@ -1297,6 +1297,7 @@ FILE TRANSFER COMMANDS
         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  file1.txt
         db0f80b718259b1488a0b63ad9ea6ecb39806fb5f49c6dddaca8c3f5a134e211  file2.txt
         2f92efe47639c6214e0059053ccd23e8552e92e6fe5d56ac8bfb9a5ea0331d74  file3.txt
+        aab41e1bb2413787017fa6f8d69dcff6a781d4b478e36de37c0328dd3194c55d  https://chtc.cs.wisc.edu
 
     Empty lines and lines beginning with a hash (``#``) are ignored.  Files appearing
     in the manifest but not transferred through ``transfer_input_files`` are ignored.
