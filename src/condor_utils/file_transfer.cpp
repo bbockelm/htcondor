@@ -101,7 +101,8 @@ enum class TransferSubCommand {
 	UploadUrl = 7,
 	ReuseInfo = 8,
 	SignUrls = 9,
-	ChecksumFile = 10
+	ChecksumFile = 10,
+	DownloadUrl = 11
 };
 
 #define COMMIT_FILENAME ".ccommit.con"
@@ -2156,6 +2157,109 @@ FileTransfer::AddDownloadFilenameRemaps(char const *remaps) {
     return i;
 
 
+bool
+FileTransfer::DownloadUrlHelper(const std::string &url, const std::string &dest_path,
+	const std::string &checksum, const std::string &checksum_type, const std::string &reservation_id,
+	bool all_transfers_succeeded, bool should_reuse, DeferredInfo &deferredTransfers,
+	bool &isDeferredTransfer, classad::ClassAd &pluginStatsAd, int &rc, int &plugin_exit_code, CondorError &errstack)
+{
+	if (!I_support_filetransfer_plugins) {
+			// we shouldn't get here, because a job shouldn't match to a machine that won't
+			// support URL transfers if the job needs URL transfers.  but if we do get here,
+			// give a nice error message.
+		errstack.pushf("FILETRANSFER", 1, "URL transfers are disabled by configuration.  Cannot transfer URL file = %s .", UrlSafePrint(url));  // URL file in err msg
+		dprintf(D_FULLDEBUG, "FILETRANSFER: URL transfers are disabled by configuration.  Cannot transfer %s.\n", UrlSafePrint(url));
+		rc = GET_FILE_PLUGIN_FAILED;
+		return true;
+	}
+
+	if (!all_transfers_succeeded) {
+		dprintf(D_FULLDEBUG, "Ignoring URL-based transfer %s because prior transfer failed.\n", url.c_str());
+		return true;
+	}
+
+	if (multifile_plugins_enabled) {
+
+			// Determine which plugin to invoke, and whether it supports multiple
+			// file transfer.
+		std::string pluginPath = DetermineFileTransferPlugin(errstack, url.c_str(), dest_path.c_str());
+		bool thisPluginSupportsMultifile = false;
+		if (plugins_multifile_support.find(pluginPath) != plugins_multifile_support.end()) {
+			thisPluginSupportsMultifile = plugins_multifile_support[pluginPath];
+		}
+
+		if (thisPluginSupportsMultifile) {
+				// Do not send the file right now!
+				// Instead, add it to a deferred list, which we'll deal with
+				// after the main download loop.
+			dprintf(D_FULLDEBUG, "DoDownload: deferring transfer of URL %s "
+				" until end of download loop.\n", UrlSafePrint(url));
+			classad::ClassAd thisTransfer;
+			thisTransfer.InsertAttr("Url", url);
+			thisTransfer.InsertAttr("LocalFileName", dest_path);
+			if (!checksum.empty())
+				thisTransfer.InsertAttr("Checksum", checksum);
+			if (!checksum_type.empty())
+				thisTransfer.InsertAttr("ChecksumType", checksum_type);
+			std::string thisTransferString;
+			classad::ClassAdUnParser unparser;
+			unparser.Unparse(thisTransferString, &thisTransfer);
+
+				// Add this result to our deferred transfers map.
+			if (deferredTransfers.find(pluginPath) == deferredTransfers.end()) {
+				auto iter = deferredTransfers.insert(std::pair<std::string, std::pair<std::string, DeferredItems>>(pluginPath,
+					std::make_pair(thisTransferString, DeferredItems())));
+				iter.first->second.second.emplace_back(std::make_pair(dest_path, checksum));
+			}
+			else {
+				deferredTransfers[pluginPath].first += thisTransferString;
+				deferredTransfers[pluginPath].second.emplace_back(std::make_pair(dest_path, checksum));
+			}
+
+			isDeferredTransfer = true;
+		}
+	}
+
+	if (!isDeferredTransfer) {
+		dprintf(D_FULLDEBUG, "DoDownload: doing a URL transfer: (%s) to (%s)\n", UrlSafePrint(url), UrlSafePrint(dest_path));
+		TransferPluginResult result = InvokeFileTransferPlugin(errstack, url.c_str(), dest_path.c_str(), &pluginStatsAd, LocalProxyName.c_str());
+			// If transfer failed, set rc to error code that ReliSock recognizes
+		if (result != TransferPluginResult::Success) {
+			rc = GET_FILE_PLUGIN_FAILED;
+			plugin_exit_code = static_cast<int>(result);
+		}
+		else {
+			std::string computed_checksum;
+			dprintf(D_FULLDEBUG, "For single-file download, computing checksum for file %s (expected %s).\n",
+				dest_path.c_str(), checksum.c_str());
+			if (!checksum.empty() && !compute_file_sha256_checksum(dest_path.c_str(), computed_checksum, errstack)) {
+				dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+				rc = GET_FILE_CHECKSUM_FAILED;
+			} else if (computed_checksum != checksum) {
+				errstack.pushf("CHECKSUM_FILE", 4, "Computed checksum, %s, does not match expected checksum %s.",
+					computed_checksum.c_str(), checksum.c_str());
+				dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+				rc = GET_FILE_CHECKSUM_FAILED;
+			} else {
+				rc = 0; // All good!
+			}
+		}
+		CondorError err;
+		if (result == TransferPluginResult::Success && should_reuse && !m_reuse_dir->CacheFile(dest_path.c_str(), checksum,
+			checksum_type, reservation_id, err))
+		{
+			dprintf(D_FULLDEBUG, "Failed to save file %s for reuse: %s\n", dest_path.c_str(),
+				err.getFullText().c_str());
+						// Checksum failed; we shouldn't start the job with this file
+			if (!strcmp(err.subsys(), "DataReuse") && err.code() == 11) {
+				rc = -1;
+			}
+		}
+	}
+	return true;
+}
+
+
 int
 FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 {
@@ -2179,9 +2283,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 	// by certain filte transfer plugins. These need to be scoped to the full
 	// function.
 	bool isDeferredTransfer = false;
-	classad::ClassAdUnParser unparser;
-	std::map<std::string, std::string> deferredTransfers;
-	std::unique_ptr<classad::ClassAd> thisTransfer( new classad::ClassAd() );
+	DeferredInfo deferredTransfers;
 
 	bool I_go_ahead_always = false;
 	bool peer_goes_ahead_always = false;
@@ -2303,7 +2405,9 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 			break;
 		}
 
-		if ((xfer_command == TransferCommand::EnableEncryption) || (PeerDoesS3Urls && xfer_command == TransferCommand::DownloadUrl)) {
+		if ((xfer_command == TransferCommand::EnableEncryption) || (PeerDoesS3Urls && xfer_command == TransferCommand::DownloadUrl) ||
+			(PeerDoesChecksums && xfer_command == TransferCommand::Other))
+		{
 			bool cryp_ret = s->set_crypto_mode(true);
 			if (!cryp_ret) {
 				dprintf(D_ALWAYS,"DoDownload: failed to enable crypto on incoming file, exiting at %d\n",__LINE__);
@@ -2809,13 +2913,41 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 				}
 				else {
 					dprintf(D_FULLDEBUG, "Checksumming file %s; expected SHA256 %s.\n", fullname.c_str(), checksum.c_str());
-					if (!compute_file_sha256_checksum(fullname.c_str(), checksum, errstack)) {
+					std::string computed_checksum;
+					if (!compute_file_sha256_checksum(fullname.c_str(), computed_checksum, errstack)) {
+						dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+						rc = GET_FILE_CHECKSUM_FAILED;
+					} else if (computed_checksum != checksum) {
+						errstack.pushf("CHECKSUM_FILE", 4, "Computed checksum, %s, does not match expected checksum %s.",
+							computed_checksum.c_str(), checksum.c_str());
 						dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
 						rc = GET_FILE_CHECKSUM_FAILED;
 					} else {
 						rc = 0; // All good!
 					}
 				}
+			} else if (subcommand == TransferSubCommand::DownloadUrl) {
+
+				std::string url;
+				if (!file_info.EvaluateAttrString("Url", url)) {
+					// Error from other side;
+					dprintf(D_ALWAYS, "DoDownload: other side sent invalid download URL; exiting at %d\n", __LINE__);
+					return_and_resetpriv(-1);
+				}
+
+					// Pull in the checksum / type; if not present, ignore.
+				std::string checksum, checksum_type;
+				file_info.EvaluateAttrString("ChecksumType", checksum_type);
+				file_info.EvaluateAttrString("Checksum", checksum);
+
+				if (!DownloadUrlHelper(url, fullname, checksum, checksum_type, reservation_id,
+					all_transfers_succeeded, should_reuse, deferredTransfers,
+					isDeferredTransfer, pluginStatsAd, rc, plugin_exit_code, errstack))
+				{
+					dprintf(D_FULLDEBUG, "DoDownload: exiting at %d\n", __LINE__);
+					return_and_resetpriv(-1);
+				}
+
 			} else {
 				// unrecongized subcommand
 				dprintf(D_ALWAYS, "FILETRANSFER: unrecognized subcommand %i! skipping!\n", static_cast<int>(subcommand));
@@ -2838,70 +2970,15 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 				return_and_resetpriv( -1 );
 			}
 
-			if( !I_support_filetransfer_plugins ) {
-				// we shouldn't get here, because a job shouldn't match to a machine that won't
-				// support URL transfers if the job needs URL transfers.  but if we do get here,
-				// give a nice error message.
-				errstack.pushf( "FILETRANSFER", 1, "URL transfers are disabled by configuration.  Cannot transfer URL file = %s .", UrlSafePrint(URL));  // URL file in err msg
-				dprintf ( D_FULLDEBUG, "FILETRANSFER: URL transfers are disabled by configuration.  Cannot transfer %s.\n", UrlSafePrint(URL));
-				rc = GET_FILE_PLUGIN_FAILED;
+			std::string checksum = should_reuse ? iter->checksum() : "";
+			std::string checksum_type = should_reuse ? iter->checksum_type() : "";
+			if (!DownloadUrlHelper(URL, fullname, checksum, checksum_type, reservation_id,
+				all_transfers_succeeded, should_reuse, deferredTransfers,
+				isDeferredTransfer, pluginStatsAd, rc, plugin_exit_code, errstack))
+			{
+				dprintf(D_FULLDEBUG, "DoDownload: exiting at %d\n", __LINE__);
+				return_and_resetpriv(-1);
 			}
-
-			if( all_transfers_succeeded && (rc != GET_FILE_PLUGIN_FAILED) && multifile_plugins_enabled ) {
-
-				// Determine which plugin to invoke, and whether it supports multiple
-				// file transfer.
-				std::string pluginPath = DetermineFileTransferPlugin( errstack, URL.c_str(), fullname.c_str() );
-				bool thisPluginSupportsMultifile = false;
-				if( plugins_multifile_support.find( pluginPath ) != plugins_multifile_support.end() ) {
-					thisPluginSupportsMultifile = plugins_multifile_support[pluginPath];
-				}
-
-				if( thisPluginSupportsMultifile ) {
-					// Do not send the file right now!
-					// Instead, add it to a deferred list, which we'll deal with
-					// after the main download loop.
-					dprintf( D_FULLDEBUG, "DoDownload: deferring transfer of URL %s "
-						" until end of download loop.\n", UrlSafePrint(URL) );
-					thisTransfer->Clear();
-					thisTransfer->InsertAttr( "Url", URL );
-					thisTransfer->InsertAttr( "LocalFileName", fullname );
-					std::string thisTransferString;
-					unparser.Unparse( thisTransferString, thisTransfer.get() );
-
-					// Add this result to our deferred transfers map.
-					if ( deferredTransfers.find( pluginPath ) == deferredTransfers.end() ) {
-						deferredTransfers.insert( std::pair<std::string, std::string>( pluginPath, thisTransferString ) );
-					}
-					else {
-						deferredTransfers[pluginPath] += thisTransferString;
-					}
-
-					isDeferredTransfer = true;
-				}
-			}
-
-			if( all_transfers_succeeded && (rc != GET_FILE_PLUGIN_FAILED) && (!isDeferredTransfer) ) {
-				dprintf( D_FULLDEBUG, "DoDownload: doing a URL transfer: (%s) to (%s)\n", UrlSafePrint(URL), UrlSafePrint(fullname));
-				TransferPluginResult result = InvokeFileTransferPlugin(errstack, URL.c_str(), fullname.c_str(), &pluginStatsAd, LocalProxyName.c_str());
-				// If transfer failed, set rc to error code that ReliSock recognizes
-				if (result != TransferPluginResult::Success) {
-					rc = GET_FILE_PLUGIN_FAILED;
-					plugin_exit_code = static_cast<int>(result);
-				}
-				CondorError err;
-				if (result == TransferPluginResult::Success && should_reuse && !m_reuse_dir->CacheFile(fullname.c_str(), iter->checksum(),
-					iter->checksum_type(), reservation_id, err))
-				{
-					dprintf(D_FULLDEBUG, "Failed to save file %s for reuse: %s\n", fullname.c_str(),
-					err.getFullText().c_str());
-						// Checksum failed; we shouldn't start the job with this file
-					if (!strcmp(err.subsys(), "DataReuse") && err.code() == 11) {
-						rc = -1;
-					}
-				}
-			}
-
 		} else if ( xfer_command == TransferCommand::XferX509 ) {
 			if ( PeerDoesGoAhead || s->end_of_message() ) {
 				rc = (s->get_x509_delegation( fullname.c_str(), false, NULL ) == ReliSock::delegation_ok) ? 0 : -1;
@@ -3169,12 +3246,36 @@ FileTransfer::DoDownload( filesize_t *total_bytes_ptr, ReliSock *s)
 	// transfer all files that needed a third party plugin. Iterate over the list
 	// of deferred transfers, and invoke each set with the appopriate plugin.
 	if ( hold_code == 0 ) {
+		dprintf(D_FULLDEBUG, "Starting transfer of deferred download URL transfers.\n");
 		for ( auto it = deferredTransfers.begin(); it != deferredTransfers.end(); ++ it ) {
 			std::vector<std::unique_ptr<ClassAd>> result_ads;
-			TransferPluginResult result = InvokeMultipleFileTransferPlugin( errstack, it->first, it->second,
+			TransferPluginResult result = InvokeMultipleFileTransferPlugin( errstack, it->first, it->second.first,
 				LocalProxyName.c_str(), false, &result_ads );
 			if (result == TransferPluginResult::Success) {
-				/*  TODO: handle deferred files.  We may need to unparse the deferredTransfers files. */
+					// Verify the checksums we were sent
+				for (const auto &deferred_item : it->second.second) {
+					if (deferred_item.second.empty()) {continue;} // no checksum provided.
+					dprintf(D_FULLDEBUG, "Computing checksum for file %s (expected %s).\n",
+						deferred_item.first.c_str(), deferred_item.second.c_str());
+					std::string computed_checksum;
+					if (!compute_file_sha256_checksum(deferred_item.first.c_str(), computed_checksum, errstack)) {
+						dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+						download_success = false;
+						hold_code = FILETRANSFER_HOLD_CODE::DownloadFileError;
+						hold_subcode = GET_FILE_CHECKSUM_FAILED;
+						try_again = false;
+						error_buf.formatstr("%s", errstack.getFullText().c_str());
+					} else if (computed_checksum != deferred_item.second) {
+						errstack.pushf("CHECKSUM_FILE", 4, "Computed checksum, %s, does not match expected checksum %s.",
+							computed_checksum.c_str(), deferred_item.second.c_str());
+						dprintf(D_ALWAYS, "%s\n", errstack.getFullText().c_str());
+						download_success = false;
+						hold_code = FILETRANSFER_HOLD_CODE::DownloadFileError;
+						hold_subcode = GET_FILE_CHECKSUM_FAILED;
+						try_again = false;
+						error_buf.formatstr("%s", errstack.getFullText().c_str());
+					}
+				}
 			} else {
 				dprintf( D_ALWAYS, "FILETRANSFER: Multiple file download failed: %s\n",
 					errstack.getFullText().c_str() );
@@ -3809,7 +3910,8 @@ FileTransfer::InvokeMultiUploadPlugin(const std::string &pluginPath, const std::
 
 bool
 FileTransfer::ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
-	const std::string &tag, std::vector<FileTransfer::ReuseInfo> &checksum_info, CondorError &err)
+	const std::string &tag, std::vector<FileTransfer::ReuseInfo> &checksum_info, bool require_size_field,
+	CondorError &err)
 {
 	std::unique_ptr<FILE, decltype(&fclose)>
 	manifest(safe_fopen_wrapper_follow(checksum_info_filename.c_str(), "r"), fclose);
@@ -3849,22 +3951,24 @@ FileTransfer::ParseManifestHelper(const std::string &checksum_info_filename, con
 			//   - stat()'ing the file on the submit sided, then
 			//   - falling back to requiring this column (for URLs; we can't stat them).
 		const char *size_str = sl.next();
-		long long bytes_long;
+		long long bytes_long = -1;
 		if (size_str == nullptr) {
-			if (IsUrl(fname)) {
+			bool is_url = IsUrl(fname);
+			if (is_url && require_size_field) {
 				dprintf(D_ALWAYS, "%s: Invalid manifest file line (missing size for URL): %s (line #%d)\n",
 					err_name.c_str(), line.c_str(), lineno);
 				err.pushf(err_name.c_str(), 4, "Invalid manifest file line (missing size for URL): %s (line #%d)",
 					line.c_str(), lineno);
 				return false;
+			} else if (!is_url) {
+				struct stat statbuf;
+				if (-1 == stat(fname, &statbuf)) {
+					err.pushf(err_name.c_str(), 5, "Unable to get size of file %s in data manifest: %s (line #%d)",
+						fname, strerror(errno), lineno);
+					return false;
+				}
+				bytes_long = statbuf.st_size;
 			}
-			struct stat statbuf;
-			if (-1 == stat(fname, &statbuf)) {
-				err.pushf(err_name.c_str(), 5, "Unable to get size of file %s in data manifest: %s (line #%d)",
-					fname, strerror(errno), lineno);
-				return false;
-			}
-			bytes_long = statbuf.st_size;
 		} else {
 			try {
 				bytes_long = std::stoll(size_str);
@@ -3900,7 +4004,7 @@ FileTransfer::ParseDataManifest()
 	{
 		return true;
 	}
-	return ParseManifestHelper(checksum_info, "ParseDataManifest", tag, m_reuse_info, err);
+	return ParseManifestHelper(checksum_info, "ParseDataManifest", tag, m_reuse_info, true, err);
 }
 
 
@@ -3915,7 +4019,7 @@ FileTransfer::ParseChecksumInfo()
 		return true;
 	}
 	dprintf(D_FULLDEBUG, "Will use checksums from %s.\n", checksum_info.c_str());
-	return ParseManifestHelper(checksum_info, ATTR_TRANSFER_INPUT_MANIFEST_SHA256, "", m_checksum_info, m_checksum_info_err);
+	return ParseManifestHelper(checksum_info, ATTR_TRANSFER_INPUT_MANIFEST_SHA256, "", m_checksum_info, false, m_checksum_info_err);
 }
 
 
@@ -4532,7 +4636,12 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 		}
 
 		if ( fileitem.isSrcUrl() ) {
-			file_command = TransferCommand::DownloadUrl;
+			if (PeerDoesChecksums) {
+				file_command = TransferCommand::Other;
+				file_subcommand = TransferSubCommand::DownloadUrl;
+			} else {
+				file_command = TransferCommand::DownloadUrl;
+			}
 		}
 
 		std::string multifilePluginPath;
@@ -4755,7 +4864,8 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 					if (item_checksum_info) {
 						xfer_ad.InsertAttr("Checksum", item_checksum_info->checksum());
 						xfer_ad.InsertAttr("ChecksumType", item_checksum_info->checksum_type());
-						xfer_ad.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
+						if (item_checksum_info->size() >= 0)
+							xfer_ad.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
 					}
 					std::string xfer_str;
 					unparser.Unparse( xfer_str, &xfer_ad );
@@ -4819,6 +4929,28 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 					sPrintAd(junkbuf, file_info);
 					bytes = junkbuf.length();
 				}
+			} else if (file_subcommand == TransferSubCommand::DownloadUrl) {
+					// Send file to transfer alongside the checksum request, if available.
+				if (!file_info.InsertAttr("Url", fullname)) {
+					dprintf(D_ALWAYS, "DoUpload: unable to create ClassAd URL command.\n");
+					return_and_resetpriv(-1);
+				}
+
+				if (item_checksum_info) {
+					dprintf(D_FULLDEBUG, "Will request the download be compared against checksum '%s'.\n",
+						item_checksum_info->checksum().c_str());
+					file_info.InsertAttr("Checksum", item_checksum_info->checksum());
+					file_info.InsertAttr("ChecksumType", item_checksum_info->checksum_type());
+					if (item_checksum_info->size() >= 0)
+						file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
+				}
+
+					// Note no EOM is sent here; it'll be sent later.
+				if (!putClassAd(s, file_info)) {
+					dprintf(D_FULLDEBUG, "DoUpload: exiting at %d\n", __LINE__);
+					return_and_resetpriv(-1);
+				}
+
 			} else {
 				dprintf( D_ALWAYS, "DoUpload: invalid subcommand %i, skipping %s.",
 					static_cast<int>(file_subcommand), UrlSafePrint(filename));
@@ -4836,8 +4968,8 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 				rc = -1;
 			}
 		} else if (file_command == TransferCommand::DownloadUrl) {
-			// send the URL and that's it for now.
-			// TODO: this should probably be a classad
+			// send the URL and that's it for now; note we don't indicate checksums are needed
+			// as that's handled by the new ClassAd-based download URL command.
 			if(!s->code(fullname)) {
 				dprintf( D_FULLDEBUG, "DoUpload: failed to send fullname: %s\n", UrlSafePrint(fullname));
 				rc = -1;
@@ -4845,7 +4977,6 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 				dprintf( D_FULLDEBUG, "DoUpload: sent fullname and NO eom: %s\n", UrlSafePrint(fullname));
 				rc = 0;
 			}
-			should_send_checksum = true;
 
 			// on the sending side, we don't know how many bytes the actual
 			// file was, since we aren't the ones downloading it.  to find out
@@ -4997,10 +5128,12 @@ FileTransfer::DoUpload(filesize_t *total_bytes_ptr, ReliSock *s)
 
 			ClassAd file_info;
 			auto sub = static_cast<int>(TransferSubCommand::ChecksumFile);
+			file_info.InsertAttr("ProtocolVersion", 1);
 			file_info.InsertAttr("SubCommand", sub);
 			file_info.InsertAttr("Checksum", item_checksum_info->checksum());
 			file_info.InsertAttr("ChecksumType", item_checksum_info->checksum_type());
-			file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
+			if (item_checksum_info->size() >= 0)
+				file_info.InsertAttr("Size", static_cast<long long>(item_checksum_info->size()));
 
 				// Note no EOM is sent here; it'll be sent outside the conditional.
 			if (!putClassAd(s, file_info)) {

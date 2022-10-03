@@ -78,7 +78,8 @@ enum FileTransferStatus {
 enum class TransferPluginResult {
 	Success = 0,
 	Error = 1,
-	InvalidCredentials = 2
+	InvalidCredentials = 2,
+	ChecksumFailure = 3
 };
 
 namespace htcondor {
@@ -591,7 +592,7 @@ class FileTransfer final: public Service {
 			const std::string &checksum,
 			const std::string &checksum_type,
 			const std::string &tag,
-			uint64_t size)
+			int64_t size)
 		: m_size(size),
 		m_filename(filename),
 		m_checksum(checksum),
@@ -602,10 +603,10 @@ class FileTransfer final: public Service {
 		const std::string &filename() const {return m_filename;}
 		const std::string &checksum() const {return m_checksum;}
 		const std::string &checksum_type() const {return m_checksum_type;}
-		uint64_t size() const {return m_size;}
+		int64_t size() const {return m_size;}
 
 	private:
-		const uint64_t m_size{0};
+		const int64_t m_size{-1};
 		const std::string m_filename;
 		const std::string m_checksum;
 		const std::string m_checksum_type;
@@ -638,7 +639,25 @@ class FileTransfer final: public Service {
 	// A helper function containing the common pieces between ParseDataManifest and
 	// ParseChecksumInfo
 	bool ParseManifestHelper(const std::string &checksum_info_filename, const std::string &err_name,
-        const std::string &tag, std::vector<ReuseInfo> &checksum_info, CondorError &err);
+        	const std::string &tag, std::vector<ReuseInfo> &checksum_info, bool require_size_field, CondorError &err);
+
+	// A 'deferred item' is a tuple of a destination filename and a checksum value
+	typedef std::pair<std::string, std::string> DeferredItem;
+	typedef std::vector<DeferredItem> DeferredItems;
+	// Map from a protocol name to a string of serialized ClassAds and corresponding list of
+	// deferred items.
+	typedef std::unordered_map<std::string, std::pair<std::string, DeferredItems>> DeferredInfo;
+
+	// A helper function for downloading URLs; captures both the old-style (sending raw URL) and new-style
+	// (sending information in a ClassAd).
+	//
+
+	bool DownloadUrlHelper(const std::string &url, const std::string &dest_path,
+		const std::string &checksum, const std::string &checksum_type, const std::string &reservation_id,
+		bool all_transfers_succeeded, bool should_reuse, DeferredInfo &deferredTransfers,
+		bool &isDeferredTransfer, classad::ClassAd &pluginStatsAd, int &rc, int &plugin_exit_code,
+		CondorError &errstack);
+
 };
 
 // returns 0 if no expiration
