@@ -121,6 +121,7 @@ char const * const HOME_POOL_SUBMITTER_TAG = "";
 extern GridUniverseLogic* _gridlogic;
 
 #include "qmgmt.h"
+#include "htcondordb_client.h"
 #include "qmgmt_startup_limits.h"
 #include "condor_qmgr.h"
 #include "condor_vm_universe_types.h"
@@ -3782,6 +3783,199 @@ QueryJobAdsContinuation::analyze_job(JobQueueJob * job)
 	}
 }
 
+
+// Folds the library's "<universe> <status> <count>" lines into the counters the
+// summary ad publishes. One triple per line, which is what IncrementLiveJobCounter
+// takes with the count as its increment -- the same counter the job-queue path
+// feeds one job at a time.
+static void
+ApplyDBJobCounts(LiveJobCounters & counters, const std::string & text)
+{
+	size_t pos = 0;
+	while (pos < text.size()) {
+		size_t eol = text.find('\n', pos);
+		if (eol == std::string::npos) { eol = text.size(); }
+		int universe = 0, status = 0;
+		long long n = 0;
+		if (sscanf(text.c_str() + pos, "%d %d %lld", &universe, &status, &n) == 3 && n > 0) {
+			IncrementLiveJobCounter(counters, universe, status, (int)n);
+		}
+		pos = eol + 1;
+	}
+}
+
+/*
+ * Answers a job query from the mirror, with the ads written to the client by
+ * the client library's own thread rather than by this one. The event loop is
+ * the schedd's only thread, so copying the ads here would serialise concurrent
+ * queries behind each other; the job-queue path solves this by forking, which
+ * the library's threads would not survive.
+ *
+ * What is handed over is a DUPLICATE of the client's descriptor, taken once the
+ * query ad has been read and before any of the response has been written. Until
+ * the library reports it is finished this object does not touch the socket at
+ * all. Each side then closes its own descriptor; sharing the connection means
+ * neither close ends it.
+ *
+ * When the library is done, this object writes the one ad the schedd still owes
+ * -- the summary, or an error ad -- so that both paths' responses are identical
+ * byte for byte.
+ *
+ * An encrypted session advances a counter and an IV per frame, so the session's
+ * position goes over with the descriptor and comes back when the library is
+ * done. A session whose position cannot be described is answered from the job
+ * queue instead.
+ *
+ * Because the ads do not pass through this process, the running digest the
+ * ReliSock keeps of everything it has sent does not cover them. Nothing reads
+ * that digest here -- the response is the last thing on this connection -- but a
+ * caller that handed a socket over and then kept using it would have to.
+ */
+struct DBResponseWriter : Service {
+
+	DBResponseWriter(int limit, bool server_time)
+		: m_match_limit(limit), m_send_server_time(server_time)
+	{
+		query_job_counts.clear_counters();
+		my_job_counts.clear_counters();
+	}
+	~DBResponseWriter();
+
+	// Starts the query and, on success, takes responsibility for the socket. On
+	// false nothing has been written and the caller still owns it, so the query
+	// can be answered another way.
+	bool start(ReliSock * sock, const std::string & constraint, const std::string & projection);
+
+	LiveJobCounters query_job_counts;
+	LiveJobCounters my_job_counts;
+	std::string my_name;
+
+private:
+	void finish();
+
+	uintptr_t m_req{0};
+	ReliSock * m_sock{nullptr};
+	int m_match_limit;
+	bool m_send_server_time;
+	bool m_encrypted{false};
+};
+
+DBResponseWriter::~DBResponseWriter()
+{
+	// Releasing the request also drops the callback holding this pointer, so no
+	// late completion can reach a destroyed object.
+	if (m_req) { HTCondorDBClient::instance().release(m_req); }
+	// The socket was never registered with DaemonCore, so there is nothing to
+	// cancel; deleting it closes this side's descriptor and, the library's being
+	// gone by now, the connection with it.
+	delete m_sock;
+}
+
+bool
+DBResponseWriter::start(ReliSock * sock, const std::string & constraint,
+                        const std::string & projection)
+{
+	int flags = HTCONDORDB_Q_COUNTS;
+	if (m_send_server_time) { flags |= HTCONDORDB_Q_SERVER_TIME; }
+
+	// An encrypted session goes over with its position; one in the clear has no
+	// position to carry. A session that cannot be described is not one to guess
+	// at -- say so and let the caller answer another way.
+	std::string crypto_state;
+	m_encrypted = sock->get_encryption();
+	if (m_encrypted && ! sock->exportCryptoState(crypto_state)) {
+		dprintf(D_FULLDEBUG, "QUERY_JOB_ADS: this encrypted session cannot be described for "
+			"hand-off; writing the response from the event loop.\n");
+		return false;
+	}
+
+	int fd = dup(sock->get_file_desc());
+	if (fd < 0) {
+		dprintf(D_ERROR, "QUERY_JOB_ADS: could not duplicate the client socket (%s); "
+			"answering from the job queue.\n", strerror(errno));
+		return false;
+	}
+
+	// Set before the query starts, because the completion callback below reads it.
+	m_sock = sock;
+
+	std::string err;
+	// The library owns fd from here, whether or not the query starts.
+	m_req = HTCondorDBClient::instance().beginToSocket(constraint.c_str(), projection.c_str(),
+		m_match_limit, flags, fd, crypto_state, [this]() { this->finish(); }, err);
+	// The blob holds the session key. It is a second copy of something the socket
+	// already owns, but a copy on an ordinary heap block, so it does not get to
+	// outlive the call that needed it.
+	if ( ! crypto_state.empty()) {
+		OPENSSL_cleanse(&crypto_state[0], crypto_state.size());
+	}
+	if (!m_req) {
+		dprintf(D_FULLDEBUG, "QUERY_JOB_ADS: htcondordb would not write the response (%s); "
+			"answering from the job queue.\n", err.c_str());
+		m_sock = nullptr; // the caller still owns it
+		return false;
+	}
+	return true;
+}
+
+void
+DBResponseWriter::finish()
+{
+	long long ads = 0;
+	bool socket_clean = false;
+	std::string err;
+	HTCondorDBResult rc = HTCondorDBClient::instance().result(m_req, ads, socket_clean, err);
+	if (rc == HTCondorDBResult::Pending) {
+		// The library announces a response-writing query once, at the end, so this
+		// is not expected; waiting for the announcement that does come is still the
+		// right thing to do with it.
+		return;
+	}
+
+	// An encrypted session has moved on by every frame the library wrote, and the
+	// summary ad below continues it. Without its new position this socket cannot
+	// be written to at all, whatever the query did.
+	if (m_encrypted && socket_clean) {
+		std::string resumed;
+		if ( ! HTCondorDBClient::instance().cryptoState(m_req, resumed) ||
+			 ! m_sock->importCryptoState((const unsigned char *)resumed.data(), resumed.size()))
+		{
+			dprintf(D_ERROR, "QUERY_JOB_ADS: the htcondordb response left this encrypted session "
+				"somewhere it cannot be resumed; closing the connection.\n");
+			socket_clean = false;
+			rc = HTCondorDBResult::Error;
+			if (err.empty()) { err = "the encrypted session could not be resumed"; }
+		}
+	}
+
+	if (rc == HTCondorDBResult::Done) {
+		std::string counts;
+		HTCondorDBClient::instance().counts(m_req, counts);
+		ApplyDBJobCounts(query_job_counts, counts);
+
+		const char * me = nullptr;
+		LiveJobCounters * mine = nullptr;
+		if (!my_name.empty()) { me = my_name.c_str(); mine = &my_job_counts; }
+		// No analysis ad: a ForAnalysis query needs the schedd's own autocluster
+		// bookkeeping and is never routed here.
+		sendDone(m_sock, true, &query_job_counts, me, mine, nullptr);
+		dprintf(D_FULLDEBUG, "QUERY_JOB_ADS: htcondordb wrote %lld ads off the event loop.\n", ads);
+	} else if (socket_clean) {
+		dprintf(D_ERROR, "QUERY_JOB_ADS: the htcondordb response failed after %lld ads: %s\n",
+			ads, err.c_str());
+		sendJobErrorAd(m_sock, 4, "Query against the database failed");
+	} else {
+		// The response stopped part way through an ad. A well-formed error ad
+		// appended to half an ad is a stream the client cannot make sense of;
+		// dropping the connection is what reaches condor_q as a failure rather
+		// than as a queue that happens to be short.
+		dprintf(D_ERROR, "QUERY_JOB_ADS: the htcondordb response stopped part way through an ad "
+			"after %lld (%s); closing the connection.\n", ads, err.c_str());
+	}
+	delete this;
+}
+
+
 int Scheduler::command_query_job_ads(int cmd, Stream* stream)
 {
 	ClassAd queryAd;
@@ -3932,27 +4126,88 @@ int Scheduler::command_query_job_ads(int cmd, Stream* stream)
 		dprintf(dpf_level, "QUERY_JOB_ADS limit=%d, iter_options=0x%x\n", resultLimit, iter_options);
 	}
 
-	QueryJobAdsContinuation *continuation = new QueryJobAdsContinuation(
-		requirements_ptr, resultLimit, 1000, iter_options, send_server_time, query_for_analysis);
-	int proj_err = mergeProjectionFromQueryAd(queryAd, ATTR_PROJECTION, continuation->projection, true);
+	classad::References projection;
+	int proj_err = mergeProjectionFromQueryAd(queryAd, ATTR_PROJECTION, projection, true);
 	if (proj_err < 0) {
-		delete continuation;
 		if (proj_err == -1) {
 			return sendJobErrorAd(stream, 2, "Unable to evaluate projection list");
 		}
 		return sendJobErrorAd(stream, 3, "Unable to convert projection list to string list");
 	}
+
+	// if doing an only-my-jobs query, grab the job counters for this owner
+	// so we can also return the name we settled on
+	LiveJobCounters my_job_counts;
+	my_job_counts.clear_counters();
 	if ( ! my_jobs_name.empty()) {
-		// if doing an only-my-jobs query, grab the job counters for this owner
-		// and also return the name we settled on
-		continuation->my_name = my_jobs_name;
 		OwnerInfo * ownerinfo = find_ownerinfo(my_jobs_name.c_str());
-		if (ownerinfo) { continuation->my_job_counts = ownerinfo->live; }
+		if (ownerinfo) { my_job_counts = ownerinfo->live; }
 	}
+
 	bool summary_only = false;
-	if (queryAd.EvaluateAttrBoolEquiv("SummaryOnly", summary_only) && summary_only) {
-		continuation->summary_only = true;
+	queryAd.EvaluateAttrBoolEquiv("SummaryOnly", summary_only);
+
+	// Answer from the htcondordb mirror when it is configured, current, and the
+	// query is one it can answer faithfully.
+	//
+	// The exclusions are the queries whose answers do not come out of the job
+	// queue's proc ads alone: an analysis query reads the schedd's autocluster and
+	// match-rejection bookkeeping, and the cluster-ad, jobset and no-proc-ad
+	// options are answered from ads the schedd synthesizes as it iterates. Those
+	// stay on the path below. So does every query, always, when the database is
+	// unavailable: the fallback is the ordinary answer, not an error.
+	//
+	// This path also does not fork. The forked worker exists to keep a long walk
+	// of the job queue off the event loop, and there is no walk here -- the
+	// database does the work and this process copies bytes. Forking a process that
+	// has the client library's threads in it would be the wrong trade even if
+	// there were something to gain.
+	if ( ! query_for_analysis && ! summary_only && iter_options == 0) {
+		std::string why;
+		if (HTCondorDBClient::instance().usable(why)) {
+			std::string constraint(ExprTreeToString(requirements));
+			std::string projection_list;
+			for (const auto & attr : projection) {
+				if ( ! projection_list.empty()) { projection_list += ","; }
+				projection_list += attr;
+			}
+			// The library writes the ads on its own thread, so this one is free
+			// again the moment the query is dispatched. Only an AES-GCM session
+			// can be handed over; a session using a per-frame MAC cannot.
+			ReliSock * rsock = dynamic_cast<ReliSock*>(stream);
+			if (rsock && ! rsock->isOutgoing_Hash_on()) {
+				auto * writer = new DBResponseWriter(resultLimit, send_server_time);
+				writer->my_name = my_jobs_name;
+				writer->my_job_counts = my_job_counts;
+				if (writer->start(rsock, constraint, projection_list)) {
+					scheduler.stats.QueryJobAdsFromMirror += 1;
+					return KEEP_STREAM;
+				}
+				// start() wrote nothing and left the socket alone, so the job
+				// queue answers after all. It says why at D_FULLDEBUG.
+				delete writer;
+			} else {
+				dprintf(D_FULLDEBUG, "QUERY_JOB_ADS: this session cannot be handed over "
+					"(encryption=%d MAC=%d); answering from the job queue.\n",
+					rsock ? (int)rsock->get_encryption() : -1,
+					rsock ? (int)rsock->isOutgoing_Hash_on() : -1);
+			}
+			// Reached only when the hand-off was refused above; the job queue
+			// answers and the reason is already in the log at D_FULLDEBUG.
+			scheduler.stats.QueryJobAdsMirrorDeclined += 1;
+		} else if (HTCondorDBClient::instance().mode() != HTCondorDBUse::Never) {
+			scheduler.stats.QueryJobAdsMirrorDeclined += 1;
+			dprintf(D_FULLDEBUG, "QUERY_JOB_ADS: not using htcondordb: %s\n", why.c_str());
+		}
 	}
+
+	scheduler.stats.QueryJobAdsFromJobQueue += 1;
+	QueryJobAdsContinuation *continuation = new QueryJobAdsContinuation(
+		requirements_ptr, resultLimit, 1000, iter_options, send_server_time, query_for_analysis);
+	continuation->projection = projection;
+	continuation->my_name = my_jobs_name;
+	continuation->my_job_counts = my_job_counts;
+	continuation->summary_only = summary_only;
 
 	ForkStatus fork_status = schedd_forker.NewJob();
 	if (fork_status == FORK_PARENT)

@@ -801,6 +801,161 @@ void ReliSock::resetHeaderMD()
 	m_final_recv_header = false;
 }
 
+namespace {
+
+// The interchange format for a live AES-GCM session, as the Go CEDAR
+// implementation writes and reads it. Keep these in step with that side: a
+// mismatch is not a parse error on the wire, it is a client receiving bytes it
+// cannot decrypt.
+const char CRYPTO_STATE_MAGIC[4] = { 'C', 'D', 'R', 'X' };
+constexpr uint16_t CRYPTO_STATE_VERSION = 1;
+constexpr size_t CRYPTO_STATE_KEY_LEN = 32;
+constexpr size_t CRYPTO_STATE_IV_LEN = 16;
+constexpr size_t CRYPTO_STATE_DIGEST_LEN = 32;
+constexpr size_t CRYPTO_STATE_FIXED_LEN = 4 + 2 + 1 + CRYPTO_STATE_KEY_LEN +
+	2 * CRYPTO_STATE_IV_LEN + 4 + 4;
+
+constexpr unsigned char CS_FLAG_ENCRYPTED           = 1 << 0;
+constexpr unsigned char CS_FLAG_AUTHENTICATED       = 1 << 1;
+constexpr unsigned char CS_FLAG_FINISHED_SEND_AAD   = 1 << 2;
+constexpr unsigned char CS_FLAG_FINISHED_RECV_AAD   = 1 << 3;
+constexpr unsigned char CS_FLAG_SEND_DIGEST_WRITTEN = 1 << 4;
+constexpr unsigned char CS_FLAG_RECV_DIGEST_WRITTEN = 1 << 5;
+
+void appendBE16(std::string & out, uint16_t v) {
+	uint16_t n = htons(v);
+	out.append((const char *)&n, sizeof(n));
+}
+
+void appendBE32(std::string & out, uint32_t v) {
+	uint32_t n = htonl(v);
+	out.append((const char *)&n, sizeof(n));
+}
+
+void appendVar(std::string & out, const unsigned char * p, size_t n) {
+	appendBE16(out, (uint16_t)n);
+	out.append((const char *)p, n);
+}
+
+uint16_t readBE16at(const unsigned char * p) {
+	uint16_t n;
+	memcpy(&n, p, sizeof(n));
+	return ntohs(n);
+}
+
+uint32_t readBE32at(const unsigned char * p) {
+	uint32_t n;
+	memcpy(&n, p, sizeof(n));
+	return ntohl(n);
+}
+
+} // anonymous namespace
+
+bool
+ReliSock::exportCryptoState(std::string & blob) const
+{
+	blob.clear();
+	if (!get_encryption() || !crypto_state_) { return false; }
+	if (crypto_state_->m_keyInfo.getProtocol() != CONDOR_AESGCM) { return false; }
+	if (crypto_state_->m_keyInfo.getKeyLength() != CRYPTO_STATE_KEY_LEN) { return false; }
+	// Both directions must have carried an encrypted frame. The next frame in a
+	// direction that has not still owes the handshake digests, and a borrower
+	// that writes them itself does NOT reproduce the AAD the peer expects --
+	// relaxing this made a Go client's first frame fail authentication while a
+	// condor_q, whose send side was already finished, kept working. Until the
+	// borrowed stream can build that AAD identically, a position we would have
+	// to mutate this socket to reach is not one to describe.
+	if (!m_finished_send_header || !m_finished_recv_header) {
+		dprintf(D_FULLDEBUG, "exportCryptoState: a direction has not yet carried an "
+			"encrypted frame (send=%d recv=%d); not handing this session over.\n",
+			(int)m_finished_send_header, (int)m_finished_recv_header);
+		return false;
+	}
+	if (m_final_mds.size() < 2 * CRYPTO_STATE_DIGEST_LEN) { return false; }
+	// A partly written outgoing message is a position with no name in the
+	// format: the borrower would start its first frame in the middle of ours.
+	if (snd_msg.buf.num_used() > 0) { return false; }
+
+	const StreamCryptoState & scs = crypto_state_->m_stream_crypto_state;
+
+	// Taken from the socket's actual state rather than asserted: the borrower has
+	// to know which direction still owes a handshake digest, because that is the
+	// direction whose next frame must carry one.
+	unsigned char flags = CS_FLAG_ENCRYPTED;
+	if (m_finished_send_header) { flags |= CS_FLAG_FINISHED_SEND_AAD; }
+	if (m_finished_recv_header) { flags |= CS_FLAG_FINISHED_RECV_AAD; }
+	// The digests travel in the trailer below; these two only say whether a
+	// direction ever carried pre-encryption bytes, which the borrower needs when
+	// a digest is absent (an unused direction contributes zeros, not a hash of
+	// nothing).
+	if (m_final_send_header) { flags |= CS_FLAG_SEND_DIGEST_WRITTEN; }
+	if (m_final_recv_header) { flags |= CS_FLAG_RECV_DIGEST_WRITTEN; }
+	if (isAuthenticated()) { flags |= CS_FLAG_AUTHENTICATED; }
+
+	blob.append(CRYPTO_STATE_MAGIC, sizeof(CRYPTO_STATE_MAGIC));
+	appendBE16(blob, CRYPTO_STATE_VERSION);
+	blob.push_back((char)flags);
+	blob.append((const char *)crypto_state_->m_keyInfo.getKeyData(), CRYPTO_STATE_KEY_LEN);
+	blob.append((const char *)scs.m_iv_enc.iv, CRYPTO_STATE_IV_LEN);
+	blob.append((const char *)scs.m_iv_dec.iv, CRYPTO_STATE_IV_LEN);
+	appendBE32(blob, scs.m_ctr_enc);
+	appendBE32(blob, scs.m_ctr_dec);
+	// m_final_mds holds the send digest first and the receive digest second,
+	// which is the order the first frame's authenticated data wants them in and
+	// the order the format names them.
+	if (m_final_mds.size() >= 2 * CRYPTO_STATE_DIGEST_LEN) {
+		appendVar(blob, &m_final_mds[0], CRYPTO_STATE_DIGEST_LEN);
+		appendVar(blob, &m_final_mds[0] + CRYPTO_STATE_DIGEST_LEN, CRYPTO_STATE_DIGEST_LEN);
+	} else {
+		// Both directions have carried a frame, so neither owes a digest and the
+		// trailer carries none; the borrower reads them as absent.
+		appendVar(blob, nullptr, 0);
+		appendVar(blob, nullptr, 0);
+	}
+	const char * peer = get_sinful_peer();
+	appendVar(blob, (const unsigned char *)(peer ? peer : ""), peer ? strlen(peer) : 0);
+	return true;
+}
+
+bool
+ReliSock::importCryptoState(const unsigned char * blob, size_t len)
+{
+	if (!blob || len < CRYPTO_STATE_FIXED_LEN) { return false; }
+	if (memcmp(blob, CRYPTO_STATE_MAGIC, sizeof(CRYPTO_STATE_MAGIC)) != 0) { return false; }
+	size_t off = sizeof(CRYPTO_STATE_MAGIC);
+	if (readBE16at(blob + off) != CRYPTO_STATE_VERSION) { return false; }
+	off += 2;
+	off += 1; // flags; the session they describe is the one we lent out
+	if (!get_encryption() || !crypto_state_) { return false; }
+	if (crypto_state_->m_keyInfo.getProtocol() != CONDOR_AESGCM) { return false; }
+	if (crypto_state_->m_keyInfo.getKeyLength() != CRYPTO_STATE_KEY_LEN) { return false; }
+
+	// The borrower was given this session; a blob describing a different key or
+	// a different IV is not this session's position, and continuing from it
+	// would quietly produce frames the client cannot read.
+	if (memcmp(blob + off, crypto_state_->m_keyInfo.getKeyData(), CRYPTO_STATE_KEY_LEN) != 0) {
+		return false;
+	}
+	off += CRYPTO_STATE_KEY_LEN;
+	StreamCryptoState & scs = crypto_state_->m_stream_crypto_state;
+	if (memcmp(blob + off, scs.m_iv_enc.iv, CRYPTO_STATE_IV_LEN) != 0) { return false; }
+	off += CRYPTO_STATE_IV_LEN;
+	if (memcmp(blob + off, scs.m_iv_dec.iv, CRYPTO_STATE_IV_LEN) != 0) { return false; }
+	off += CRYPTO_STATE_IV_LEN;
+
+	uint32_t ctr_enc = readBE32at(blob + off);
+	off += 4;
+	uint32_t ctr_dec = readBE32at(blob + off);
+
+	// Frames only ever go out while the socket is lent, so the outgoing counter
+	// may only have moved forward and the incoming one may not have moved at
+	// all. Anything else means the blob is not this session's.
+	if (ctr_enc < scs.m_ctr_enc || ctr_dec != scs.m_ctr_dec) { return false; }
+
+	scs.m_ctr_enc = ctr_enc;
+	return true;
+}
+
 ReliSock::RcvMsg :: RcvMsg() :
     mode_(MD_OFF),
     mdChecker_(0), 

@@ -71,6 +71,11 @@
   such as inefficient resource usage or held jobs and recommending
   specific follow-up commands to investigate them.
   :jira:`3892`
+- The *condor_schedd* can now answer :tool:`condor_q` queries from an
+  *htcondordb* mirror of its job queue rather than walking the queue itself,
+  controlled by the new :macro:`SCHEDD_QUERY_USE_HTCONDORDB`. The default is
+  to always walk the queue.
+  :jira:`4048`
 
 - :tool:`condor_gpu_discovery` now advertises an :ad-attr:`Integrated`
   attribute that is true for NVIDIA GPUs that share their memory with the

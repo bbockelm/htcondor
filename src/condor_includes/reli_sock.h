@@ -298,6 +298,33 @@ public:
 		// Reset the message digests for header integrity.
 	void resetHeaderMD();
 
+	/*
+	 * Hand this socket's live AES-GCM session to another writer, and take it
+	 * back afterwards.
+	 *
+	 * Lending a connection to code outside this process -- a library given a
+	 * duplicate of the descriptor so it can write a long response without this
+	 * daemon's event loop copying it -- works at once while the session is in
+	 * the clear, because every frame is self-contained. An encrypted session is
+	 * not: the counter and the IV advance with each frame, so the borrower has
+	 * to be told where the session stands and this socket has to be told where
+	 * the borrower left it.
+	 *
+	 * exportCryptoState writes that position in the interchange format the Go
+	 * CEDAR implementation reads (its ExportCryptoState/NewStreamWithCryptoState
+	 * pair), and importCryptoState takes the borrower's final position back so
+	 * the next frame written here continues the same session. Nothing may be
+	 * written to the socket between the two.
+	 *
+	 * Both refuse a session that is not encrypted with AES-GCM, and a session
+	 * that has not yet sent and received an encrypted frame -- before that
+	 * point the next frame still has to carry the handshake digests, which is
+	 * a position worth refusing to describe rather than describing subtly
+	 * wrong. Both return false without touching anything when they refuse.
+	 */
+	bool exportCryptoState(std::string & blob) const;
+	bool importCryptoState(const unsigned char * blob, size_t len);
+
 	void SetXferAliveCallback(std::function<void(void)> &f) {m_xfer_alive_callback = f;}
 	void ClearXferAliveCallback() {m_xfer_alive_callback = {};}
 	void XferPingAliveTime()      const {if (m_xfer_alive_callback) m_xfer_alive_callback();}

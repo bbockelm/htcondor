@@ -34,6 +34,7 @@
 #include "qmgmt.h"
 #include "condor_qmgr.h"
 #include "scheduler.h"
+#include "htcondordb_client.h"
 #include "dedicated_scheduler.h"
 #include "condor_adtypes.h"
 #include "condor_uid.h"
@@ -65,11 +66,17 @@ void usage(char* name)
 	exit( 1 );
 }
 
+// The schedd's own JOB_QUEUE_LOG, kept past main_init because a reconfig has to
+// tell the htcondordb client which log it must find the mirror following: a
+// database mirroring some other schedd would answer every query, with the wrong
+// jobs.
+static std::string job_queue_name;
+
 void
 main_init(int argc, char* argv[])
 {
 	char**		ptr = nullptr; 
-	std::string job_queue_name;
+
  
 	int argc_count = 1;
 	for(ptr = argv + 1, argc_count = 1; argc_count<argc && *ptr; ptr++,argc_count++)
@@ -171,6 +178,8 @@ main_init(int argc, char* argv[])
 #endif
 
 	daemonCore->InstallAuditingCallback( AuditLogNewConnection );
+
+	HTCondorDBClient::instance().config("SCHEDD", job_queue_name.c_str());
 } 
 
 void
@@ -179,12 +188,14 @@ main_config()
 	GridUniverseLogic::reconfig();
 	scheduler.reconfig();
 	dedicated_scheduler.reconfig();
+	HTCondorDBClient::instance().config("SCHEDD", job_queue_name.c_str());
 }
 
 
 void
 main_shutdown_fast()
 {
+	HTCondorDBClient::instance().shutdown();
 	dedicated_scheduler.shutdown_fast();
 	GridUniverseLogic::shutdown_fast();
 	scheduler.shutdown_fast();

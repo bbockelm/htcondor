@@ -34,6 +34,13 @@ typedef struct ScheddJobCounters {
    stats_entry_abs<int> JobsUnmaterialized;
 
    stats_entry_recent<int> JobsSubmitted;        // jobs submitted over lifetime of schedd
+   // Which path answered a QUERY_JOB_ADS. The three are exclusive and sum to the
+   // queries this schedd was asked, so the ratio says whether a configured mirror
+   // is actually carrying anything -- a question the log could not answer, because
+   // a mirror that is present but never used looks exactly like one that is absent.
+   stats_entry_recent<int> QueryJobAdsFromJobQueue;  // walked this schedd's own queue
+   stats_entry_recent<int> QueryJobAdsFromMirror;    // handed to the htcondordb client
+   stats_entry_recent<int> QueryJobAdsMirrorDeclined;// mirror configured, not usable for this query
    stats_entry_recent<int> JobsStarted;          // jobs started over schedd lifetime
    stats_entry_recent<int> JobsExited;           // jobs exited (success or failure) over schedd lifetime
    stats_entry_recent<int> JobsCompleted;        // jobs successfully completed over schedd lifetime

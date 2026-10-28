@@ -396,6 +396,69 @@ These macros control the *condor_schedd*.
     reached, the next query will be handled in the *condor_schedd* 's
     main process.
 
+:macro-def:`SCHEDD_QUERY_USE_HTCONDORDB`
+    Whether the *condor_schedd* answers :tool:`condor_q` queries from an
+    *htcondordb* mirror of its job queue instead of walking the queue itself.
+    Three values are recognized:
+
+    ``NEVER``
+        The default. The client library is not loaded and every query is
+        answered from the job queue.
+    ``AUTO``
+        The mirror answers a query while the database reports that it has read
+        this *condor_schedd*'s :macro:`JOB_QUEUE_LOG` through to the end, and
+        did so within :macro:`SCHEDD_QUERY_HTCONDORDB_MAX_LAG` seconds.
+        Otherwise the job queue answers. With nothing naming an *htcondordb*
+        daemon, or with the client library not installed, nothing is loaded and
+        the *condor_schedd* behaves exactly as one without this feature.
+    ``ALWAYS``
+        The mirror answers whenever a session to the database is up, whatever
+        it reports about its freshness. Use this only where a fast answer
+        matters more than a current one.
+
+    Whatever the setting, a query the mirror cannot answer faithfully is
+    answered from the job queue: an analysis query (:tool:`condor_q` ``-better-analyze``),
+    and one asking for cluster ads, jobset ads, or no proc ads. So is every
+    query while the database is unreachable, so turning this on does not make
+    the queue unreadable when the database is down.
+
+    The mirror path does not fork a worker process (see
+    :macro:`SCHEDD_QUERY_WORKERS`): there is no walk of the job queue to keep
+    off the event loop, only buffers to copy to the client's socket.
+
+    The ads are relayed in the form the database stores them, without being
+    parsed into ClassAds in the *condor_schedd*. Private attributes are removed
+    on the way out, exactly as they are on the job-queue path.
+
+:macro-def:`SCHEDD_QUERY_HTCONDORDB_MAX_LAG`
+    With :macro:`SCHEDD_QUERY_USE_HTCONDORDB` set to ``AUTO``, the largest
+    number of seconds since the database last read the job queue log for its
+    answers still to be used. The default is 30. A value of 0 removes the time
+    bound, leaving only the requirement that the database had reached the end
+    of the log. Ignored when the setting is ``ALWAYS``.
+
+:macro-def:`SCHEDD_QUERY_HTCONDORDB_PROBE_INTERVAL`
+    How often, in seconds, the *condor_schedd* re-reads the *htcondordb*
+    daemon's sync-health advertisement. The default is 15. The read happens off
+    the main thread and its verdict is cached, so no query ever waits for one.
+
+:macro-def:`HTCONDORDB_CLIENT_LIBRARY`
+    Full path to the *htcondordb* client shared library. When unset,
+    ``$(LIBEXEC)/libhtcondordb_client.so`` is tried, and then the bare library
+    name through the dynamic loader's own search path. The library is loaded
+    with ``dlopen`` and need not be present: without it, a daemon configured to
+    use the database says so once in its log and falls back to its ordinary
+    code paths.
+
+:macro-def:`HTCONDORDB_ADDRESS`
+    Sinful string or ``host:port`` of the *htcondordb* daemon. When unset, the
+    client locates the daemon the way every other *htcondordb* client does,
+    from ``HTCONDORDB_ADDRESS_FILE`` or ``HTCONDORDB_HOST``.
+
+:macro-def:`HTCONDORDB_JOBS_TABLE`
+    Name of the *htcondordb* table holding the mirrored live job queue. The
+    default is ``jobs``.
+
 :macro-def:`CONDOR_Q_USE_V3_PROTOCOL`
     A boolean value that, when ``True``, causes the *condor_schedd* to
     use an algorithm that responds to :tool:`condor_q` requests by not
