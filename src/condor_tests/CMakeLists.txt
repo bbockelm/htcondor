@@ -337,6 +337,7 @@ if (BUILD_TESTING)
 			# Windows doesn't implement common file transfer yet, so jobs can't
 			# become blocked.
 			condor_pl_test(test_unblocking_jobs "Test unblocking jobs" "quick;ctest" CTEST DEPENDS "src/condor_tests/ornithology;src/condor_tests/conftest.py")
+			condor_pl_test(test_schedd_query_htcondordb "Test SCHEDD_QUERY_USE_HTCONDORDB with no database present" "quick;ctest" CTEST DEPENDS "src/condor_tests/ornithology;src/condor_tests/conftest.py")
 		endif()
 
 		# Ornithology - partial merge - Windows and MacOSX problems

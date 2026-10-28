@@ -341,6 +341,8 @@ history_queue.h
 history_utils.h
 hook_utils.cpp
 hook_utils.h
+htcondordb_client.cpp
+htcondordb_client.h
 internet.cpp
 ipv6_addrinfo.cpp
 ipv6_hostname.cpp

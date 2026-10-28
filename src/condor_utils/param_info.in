@@ -3740,6 +3740,42 @@ type=int
 description=Maximum number of schedd forked workers
 tags=schedd
 
+[SCHEDD_QUERY_USE_HTCONDORDB]
+default=NEVER
+type=string
+description=Whether the schedd answers condor_q queries from an htcondordb mirror of its job queue instead of from the queue itself. ALWAYS uses the mirror whenever a session to the database is up; AUTO uses it only while the database reports that it has read this schedd's job queue log to the end and did so recently; NEVER (the default) does not load the client library at all. Any query the mirror cannot answer faithfully -- an analysis query, or one asking for cluster, jobset or no-proc-ad results -- is answered from the job queue whatever this is set to, as is every query while the database is unavailable.
+tags=schedd
+
+[SCHEDD_QUERY_HTCONDORDB_MAX_LAG]
+default=30
+type=int
+description=With SCHEDD_QUERY_USE_HTCONDORDB set to AUTO, the largest number of seconds since the database last read the job queue log for its answers still to be used. 0 removes the time bound, leaving only the requirement that the database had reached end of file. Ignored when the setting is ALWAYS.
+tags=schedd
+
+[SCHEDD_QUERY_HTCONDORDB_PROBE_INTERVAL]
+default=15
+type=int
+description=How often, in seconds, the schedd re-reads the htcondordb daemon's sync-health advertisement. The read happens off the main thread and its verdict is cached, so a query never waits for one.
+tags=schedd
+
+[HTCONDORDB_CLIENT_LIBRARY]
+default=
+type=string
+description=Full path to the htcondordb client shared library. When unset, $(LIBEXEC)/libhtcondordb_client.so is tried, then the bare library name through the dynamic loader's own search path. The library is loaded with dlopen and is not required to be present; without it, daemons configured to use the database say so once and fall back to their ordinary code paths.
+tags=schedd,daemon
+
+[HTCONDORDB_ADDRESS]
+default=
+type=string
+description=Sinful string or host:port of the htcondordb daemon. When unset, the client locates the daemon the way every other htcondordb client does, from HTCONDORDB_ADDRESS_FILE or HTCONDORDB_HOST.
+tags=schedd,daemon
+
+[HTCONDORDB_JOBS_TABLE]
+default=jobs
+type=string
+description=Name of the htcondordb table holding the mirrored live job queue.
+tags=schedd,daemon
+
 [SCHEDD_NOW_JOB_VACATE_TIMEOUT]
 default=20
 type=int

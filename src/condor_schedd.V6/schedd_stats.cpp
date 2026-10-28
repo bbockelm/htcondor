@@ -187,6 +187,9 @@ void ScheddStatistics::InitMain()
    JobsRestartReconnectsBadput.set_levels(default_job_hist_lifes, COUNTOF(default_job_hist_lifes));
 
    SCHEDD_STATS_ADD_RECENT(Pool, JobsSubmitted,        IF_BASICPUB);
+   SCHEDD_STATS_ADD_RECENT(Pool, QueryJobAdsFromJobQueue,   IF_BASICPUB);
+   SCHEDD_STATS_ADD_RECENT(Pool, QueryJobAdsFromMirror,     IF_BASICPUB);
+   SCHEDD_STATS_ADD_RECENT(Pool, QueryJobAdsMirrorDeclined, IF_BASICPUB);
    SCHEDD_STATS_ADD_RECENT(Pool, Autoclusters,         IF_BASICPUB);
    SCHEDD_STATS_ADD_RECENT(Pool, ResourceRequestsSent,      IF_BASICPUB);
 
