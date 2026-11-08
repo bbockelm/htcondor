@@ -10558,6 +10558,16 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 					slot->my_match_ad->Assign(ATTR_OCU_PROJECT, ocu_project);
 				}
 
+					// Carry the OCU's borrowing rule onto the claim, so
+					// FindRunnableJob can evaluate it the way it
+					// evaluates START -- MY the claim, TARGET the
+					// candidate job -- and so an operator can see on the
+					// claim what it will lend itself to.
+				ExprTree *borrow_start = ocu->ad.LookupExpr(ATTR_OCU_BORROW_START);
+				if (borrow_start) {
+					slot->my_match_ad->Insert(ATTR_OCU_BORROW_START, borrow_start->Copy());
+				}
+
 				// If we already have a match for this OCU, then delete this match
 				if (ocu->mrec) {
 					dprintf(D_ALWAYS, "OCU %d already has a match record (%s), ignoring new match record %s\n", ocu->ocu_id, ocu->mrec->description(), slot->description());

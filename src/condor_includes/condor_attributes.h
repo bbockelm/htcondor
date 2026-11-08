@@ -423,6 +423,15 @@
 // schedd that a job is there.
 #define ATTR_OCU_OWNER  "OCUOwner"
 #define ATTR_OCU_PROJECT  "OCUProject"
+// An expression on an OCU saying which borrowers it will lend an idle
+// claim to, evaluated like START: MY is the claim, TARGET the candidate
+// job. Absent means any job that declares OCUWilling, which is the
+// behaviour without it.
+//
+// A property of the OCU rather than of the pool's configuration: which
+// jobs are safe to lend to depends on when the OCU's own seats are
+// wanted, which only the OCU knows.
+#define ATTR_OCU_BORROW_START  "OCUBorrowStart"
 #define ATTR_OCU_STATE  "OCUState"
 #define ATTR_IS_BUNDLE_REQUEST  "IsBundleRequest" // marks a resource request as a slot-bundle request
 // Job attr ("+IsBundle = true"): this job's cluster is a slot bundle.  Also the

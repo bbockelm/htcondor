@@ -10158,6 +10158,26 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad, const char * user, c
 					if ( ! OCUWilling) {
 						continue;
 					}
+					// ... and that the OCU is willing to lend to.
+					//
+					// A job saying OCUWilling says only that it consents
+					// to being preempted. It says nothing about whether
+					// preempting it will be cheap, which is what the OCU
+					// cares about: a borrower that ends before the seats
+					// are wanted costs nothing to take back, and one
+					// that does not costs whatever it had run.
+					//
+					// The rule lives on the OCU because only the OCU
+					// knows when its seats are wanted. Absent, any
+					// willing job may borrow, which is the behaviour
+					// without it.
+					if (my_match_ad->LookupExpr(ATTR_OCU_BORROW_START)) {
+						bool may_borrow = false;
+						if ( ! EvalBool(ATTR_OCU_BORROW_START, my_match_ad, job, may_borrow)
+						     || ! may_borrow) {
+							continue;
+						}
+					}
 				}
 			} else {
 				// Not an OCU claim, so skip any jobs that are OCU only
