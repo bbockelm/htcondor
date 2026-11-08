@@ -186,13 +186,27 @@ ScheddNegotiate::nextJob()
 						// negotiator has to see clusterid and procid or it will not be happy.  Sad but true.
 						m_current_job_ad.Assign(ATTR_CLUSTER_ID, m_current_job_id.cluster);
 						m_current_job_ad.Assign(ATTR_PROC_ID, OCU_qkey2);
-						// Don't match OCU claims to draining slots
-						ExprTree *existing_req = m_current_job_ad.LookupExpr(ATTR_REQUIREMENTS);
-						if (existing_req) {
-							std::string req = std::string("(") + ExprTreeToString(existing_req) + ") && (Draining =!= true)";
-							m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, req.c_str());
-						} else {
-							m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, "Draining =!= true");
+						// Don't match OCU claims to draining slots: a slot
+						// that is going away is a poor home for a claim
+						// meant to be held indefinitely.
+						//
+						// Unless the OCU says otherwise. Draining is also
+						// how an administrator frees capacity *for* an OCU
+						// -- drain with a start expression that admits this
+						// request, and the slot empties into the claim it
+						// was emptied for. Refusing to match it then leaves
+						// the capacity to whoever asks next, which is the
+						// opposite of what the drain was for.
+						bool accept_draining = false;
+						m_current_job_ad.LookupBool(ATTR_OCU_ACCEPT_DRAINING, accept_draining);
+						if ( ! accept_draining) {
+							ExprTree *existing_req = m_current_job_ad.LookupExpr(ATTR_REQUIREMENTS);
+							if (existing_req) {
+								std::string req = std::string("(") + ExprTreeToString(existing_req) + ") && (Draining =!= true)";
+								m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, req.c_str());
+							} else {
+								m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, "Draining =!= true");
+							}
 						}
 						return true;
 					}

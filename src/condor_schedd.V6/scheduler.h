@@ -949,6 +949,7 @@ class Scheduler : public Service
 
 	OCU *getOCU(int ocu_id);
 	OCU *getOCU(const JOB_ID_KEY & job_id) { return getOCU(job_id.cluster); }
+	const OwnerInfo *getOCUOwner(int ocu_id);
 
 	// Look up a slot bundle by the job cluster that defines it.
 	// Returns nullptr if that cluster is not a bundle.

@@ -910,6 +910,20 @@ Scheduler::getOCU(int ocu_id) {
 		return nullptr;
 	}
 
+// The user record an OCU hangs off, which is the owner of any claim
+// held for it.
+const OwnerInfo *
+Scheduler::getOCUOwner(int ocu_id) {
+		for (const auto &[_, oi]: OwnersInfo) {
+			for (const auto &ocu: oi->ocus) {
+				if (ocu.ocu_id == ocu_id) {
+					return oi;
+				}
+			}
+		}
+		return nullptr;
+	}
+
 // Look up the slot bundle defined by a job cluster, if that cluster is one.
 BundleRequest *
 Scheduler::getBundle(int cluster) {
@@ -1976,32 +1990,61 @@ Scheduler::count_jobs()
 		if (SubDat.num.Hits > 0) ++NumSubmitters;
 	}
 
-	// Evict jobs running on borrowed OCU claims if need be
+	// Evict jobs running on borrowed OCU claims if need be.
+	//
+	// Only as many as the owner is actually short of, and the ones that
+	// have run least first. Evicting every borrower whenever the owner
+	// wants one more seat discards work the owner had no use for: a
+	// reservation that is one seat short would take back all of them,
+	// and whatever had been running longest was as likely to go as
+	// whatever had just begun.
 	for (const auto &[name, SubDat]: Submitters) {
-		if (SubDat.num.OCUClaimsBorrowed > 0) {
-			// If this submitter has borrowed OCU claims, we need to evict them
-			// if the number of running jobs exceeds the number of wanted jobs.
-			if (SubDat.num.OCURunningJobs < SubDat.num.OCUWantedJobs) {
-				for (const auto &jid : jobs_on_borrowed_claims[name]) {
-					dprintf(D_FULLDEBUG, "Evicting job %d.%d running on OCU claim borrowed from %s\n",
-						jid.cluster, jid.proc, name.c_str());
-					match_rec *mrec = scheduler.FindMrecByJobID(jid);
+		if (SubDat.num.OCUClaimsBorrowed <= 0) {
+			continue;
+		}
+		int needed = SubDat.num.OCUWantedJobs - SubDat.num.OCURunningJobs;
+		if (needed <= 0) {
+			continue;
+		}
 
-					// it really should be there, but just in case
-					if (mrec) {
-						ClassAd *my_match_ad = mrec->my_match_ad;
+		std::vector<PROC_ID> & borrowed = jobs_on_borrowed_claims[name];
 
-						// Increment counter of per-match OCU evictions
-						if (my_match_ad) {
-							int OCUEvictions = 0;
-							my_match_ad->LookupInteger("OCUEvictions", OCUEvictions);
-							OCUEvictions++;
-							my_match_ad->Assign("OCUEvictions", OCUEvictions);
-						}
-						enqueueActOnJobMyself( jid, JA_VACATE_FAST_JOBS, true );
-					}
-				}
+			// Youngest first. What preempting a borrower costs is the
+			// work it loses, and the one that started most recently has
+			// the least to lose.
+		std::stable_sort(borrowed.begin(), borrowed.end(),
+			[](const PROC_ID &a, const PROC_ID &b) {
+				long long a_start = 0, b_start = 0;
+				GetAttributeInt(a.cluster, a.proc, ATTR_JOB_CURRENT_START_DATE, &a_start);
+				GetAttributeInt(b.cluster, b.proc, ATTR_JOB_CURRENT_START_DATE, &b_start);
+				return a_start > b_start;
+			});
+
+		for (const auto &jid : borrowed) {
+			if (needed <= 0) {
+				break;
 			}
+			match_rec *mrec = scheduler.FindMrecByJobID(jid);
+
+			// it really should be there, but just in case
+			if ( ! mrec) {
+				continue;
+			}
+			dprintf(D_FULLDEBUG, "Evicting job %d.%d running on OCU claim borrowed from %s "
+				"(%d more seat%s wanted)\n",
+				jid.cluster, jid.proc, name.c_str(), needed, needed == 1 ? "" : "s");
+
+			ClassAd *my_match_ad = mrec->my_match_ad;
+
+			// Increment counter of per-match OCU evictions
+			if (my_match_ad) {
+				int OCUEvictions = 0;
+				my_match_ad->LookupInteger("OCUEvictions", OCUEvictions);
+				OCUEvictions++;
+				my_match_ad->Assign("OCUEvictions", OCUEvictions);
+			}
+			enqueueActOnJobMyself( jid, JA_VACATE_FAST_JOBS, true );
+			needed--;
 		}
 	}
 
@@ -10481,6 +10524,39 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 				// ATTR_OCU should already be true on newer startds, but May
 				// not be for older ones.  Force to true just to be sure.
 				slot->my_match_ad->Assign(ATTR_OCU, true);
+
+					// Say which OCU this claim is for, and whose it is.
+					//
+					// FindRunnableJob decides whether a candidate job is
+					// the claim's owner or a borrower by comparing the
+					// claim's owner against the job's. A slot with
+					// nothing running on it says nothing about an owner,
+					// so without this every job -- the owner's own
+					// included -- reads as somebody else's and is
+					// refused unless it declares OCUWilling. The owner
+					// could not take back its own claim; a borrower
+					// could keep it indefinitely.
+					//
+					// Deliberately NOT RemoteOwner/RemoteProject. Those
+					// say who is running on a slot now, and the rest of
+					// the schedd reads them that way: writing them for
+					// an idle claim makes it look occupied, and the
+					// claim is torn down.
+					//
+					// ATTR_OCU_ID moves the OCU out of Idle once a job
+					// starts on it.
+				slot->my_match_ad->Assign(ATTR_OCU_ID, ocu->ocu_id);
+				const OwnerInfo *ocu_owner = scheduler.getOCUOwner(ocu->ocu_id);
+				if (ocu_owner) {
+						// Taken from the user record rather than from the
+						// OCU's request ad, so it is the spelling
+						// FindRunnableJob compares against.
+					slot->my_match_ad->Assign(ATTR_OCU_OWNER, ocu_owner->Name());
+				}
+				std::string ocu_project;
+				if (ocu->ad.LookupString(ATTR_PROJECT_NAME, ocu_project) && ! ocu_project.empty()) {
+					slot->my_match_ad->Assign(ATTR_OCU_PROJECT, ocu_project);
+				}
 
 				// If we already have a match for this OCU, then delete this match
 				if (ocu->mrec) {

@@ -411,6 +411,18 @@
 #define ATTR_OCU_ID  "OCUId"
 #define ATTR_OCU_NAME  "OCUName"
 #define ATTR_OCU_WANTED  "OCUWanted"
+// Set on an OCU request to let it match a draining slot. Off by default:
+// a slot that is going away is a poor home for a claim held
+// indefinitely. On when draining is being used to free capacity for
+// this OCU in particular.
+#define ATTR_OCU_ACCEPT_DRAINING  "OCUAcceptDraining"
+// Whose OCU claim this is, written on the claim's match ad. Distinct
+// from RemoteOwner/RemoteProject, which say who is running on a slot
+// right now: an OCU claim has an owner while nothing is running on it,
+// and writing the Remote* pair for one would tell the rest of the
+// schedd that a job is there.
+#define ATTR_OCU_OWNER  "OCUOwner"
+#define ATTR_OCU_PROJECT  "OCUProject"
 #define ATTR_OCU_STATE  "OCUState"
 #define ATTR_IS_BUNDLE_REQUEST  "IsBundleRequest" // marks a resource request as a slot-bundle request
 // Job attr ("+IsBundle = true"): this job's cluster is a slot bundle.  Also the

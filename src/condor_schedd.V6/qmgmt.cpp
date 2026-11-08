@@ -10053,6 +10053,16 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad, const char * user, c
 	std::string remoteProject;
 	my_match_ad->LookupString(ATTR_REMOTE_PROJECT, remoteProject);
 
+		// Whose OCU claim this is, which is not the same question as who
+		// is running on the slot. An OCU claim has an owner while it
+		// sits idle, and that is exactly when a job of the owner's needs
+		// to be told from a borrower's.
+	std::string ocuOwner, ocuProject;
+	my_match_ad->LookupString(ATTR_OCU_OWNER, ocuOwner);
+	my_match_ad->LookupString(ATTR_OCU_PROJECT, ocuProject);
+	if (ocuOwner.empty()) { ocuOwner = remoteOwner; }
+	if (ocuProject.empty()) { ocuProject = remoteProject; }
+
 #ifdef USE_VANILLA_START
 	std::string job_attr("JOB");
 	bool eval_for_each_job = false;
@@ -10134,8 +10144,8 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad, const char * user, c
 				// OCU ad should have ATTR_REMOTE_OWNER set to the owner of the OCU claim
 				// ... or, the job should belong to a project that has an OCU claim
 
-				if ((remoteOwner == job->ownerinfo->Name()) ||
-					(job->project ? remoteProject == job->project->Name() : false)) {
+				if ((!ocuOwner.empty() && ocuOwner == job->ownerinfo->Name()) ||
+					(job->project && !ocuProject.empty() && ocuProject == job->project->Name())) {
 					// Only match our own OCU claim if OCUWanted is true
 					if (!OCUWanted) {
 						continue;
