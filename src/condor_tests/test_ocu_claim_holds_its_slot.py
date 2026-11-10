@@ -31,16 +31,26 @@
 #     and goes straight to preempting_state with no retirement
 #     (condor_startd.V6/ResState.cpp, transition 10).
 #
-# The test is parametrized over three ways of creating the OCU:
+# The test is parametrized over four cases:
 #
-#   cli            `htcondor ocu create` with a request file, which is the
-#                  documented path and what a user gets today.
-#   api            Schedd.create_ocu() with Owner set, as test_ocu_basic.py
-#                  does.  Identical to the CLI: neither sets User.
-#   api_plus_User  Schedd.create_ocu() with User set as well as Owner.
+#   cli                `htcondor ocu create` with a request file, which is the
+#                      documented path and what a user gets today.
+#   api                Schedd.create_ocu() with Owner set, as test_ocu_basic.py
+#                      does.  Identical to the CLI: neither sets User.
+#   api_plus_User      Schedd.create_ocu() with User set as well as Owner.
+#   api_no_preemption  As `api`, but with NEGOTIATOR_CONSIDER_PREEMPTION off,
+#                      which asks whether disabling preemption protects the
+#                      claim without the User attribute.  Measured: it does.
+#                      The claim keeps its slot and the ordinary job never runs
+#                      at all, even though the slot still advertises no
+#                      RemoteUser -- so that case still fails
+#                      test_claim_advertises_its_owner.
 #
-# The first two fail and the third passes, which is both the diagnosis and a
-# candidate fix in a single run.
+# So there are two independent ways to keep the claim: set User on the request
+# ad, or turn off NEGOTIATOR_CONSIDER_PREEMPTION pool-wide.  Only the first
+# fixes the claim's advertisement; the second merely stops anyone acting on it,
+# at the cost of preemption everywhere.  A pool that sets it cannot observe
+# this bug, which is worth knowing when reading a test that sets it.
 
 import logging
 import re
@@ -121,34 +131,51 @@ def poll_until(predicate, timeout, interval=2):
 
 @config(
     params={
-        "cli": "cli",
-        "api": "api",
-        "api_plus_User": "api_plus_User",
+        "cli": {"id": "cli", "method": "cli", "config": {}},
+        "api": {"id": "api", "method": "api", "config": {}},
+        "api_plus_User": {
+            "id": "api_plus_User",
+            "method": "api_plus_User",
+            "config": {},
+        },
+        # Does turning off negotiator preemption protect the claim on its own,
+        # without the User attribute?  Worth knowing, because a slot that names
+        # nobody is not scored as a preemption in the first place.
+        "api_no_preemption": {
+            "id": "api_no_preemption",
+            "method": "api",
+            "config": {"NEGOTIATOR_CONSIDER_PREEMPTION": "False"},
+        },
     }
 )
-def ocu_creation_method(request):
+def case(request):
     return request.param
 
 
 @action
-def case_dir(test_dir, ocu_creation_method):
+def ocu_creation_method(case):
+    return case["method"]
+
+
+@action
+def case_dir(test_dir, case):
     """A directory per parametrization.  Job event logs must not be shared
     between cases: each case gets a fresh pool whose cluster ids restart at 1,
     so a reused log would let one case's handle read the previous case's
     events."""
-    path = test_dir / "case-{}".format(ocu_creation_method)
+    path = test_dir / "case-{}".format(case["id"])
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 @standup
-def condor(test_dir, ocu_creation_method):
+def condor(test_dir, case):
     # Two CPUs, and both are spoken for once the claim exists: one runs the
     # seed job, one is held by the claim.  A pool with room to spare cannot
     # answer this question -- an ordinary job would run on the spare CPU
     # whether or not the claim was safe, and the test would pass vacuously.
     with Condor(
-        test_dir / "condor-{}".format(ocu_creation_method),
+        test_dir / "condor-{}".format(case["id"]),
         config={
             "NUM_CPUS": "2",
             "MEMORY": "4096",
@@ -156,6 +183,7 @@ def condor(test_dir, ocu_creation_method):
             "NEGOTIATOR_CYCLE_DELAY": "2",
             "NEGOTIATOR_INTERVAL": "2",
             "OCU_SUPER_USERS": getpass.getuser(),
+            **case["config"],
         },
     ) as condor:
         yield condor
