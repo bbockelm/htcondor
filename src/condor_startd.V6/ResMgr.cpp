@@ -72,6 +72,7 @@ ResMgr::ResMgr() :
 
 	draining = false;
 	draining_is_graceful = false;
+	draining_is_peaceful = false;
 	on_completion_of_draining = DRAIN_NOTHING_ON_COMPLETION;
 	draining_id = 0;
 	drain_deadline = 0;
@@ -3218,8 +3219,13 @@ ResMgr::startDraining(
 	if( how_fast <= DRAIN_GRACEFUL ) {
 			// retirement time and vacate time are honored
 		draining_is_graceful = true;
+			// A peaceful drain is a graceful one that additionally gives each
+			// retiring claim unlimited retirement time, so that no job is ever
+			// killed to satisfy the drain.  Resource::retire_claim() reads this.
+		draining_is_peaceful = (how_fast <= DRAIN_PEACEFUL);
 		time_t graceful_retirement = gracefulDrainingTimeRemaining();
-		dprintf(D_ALWAYS,"Initiating graceful draining.\n");
+		dprintf(D_ALWAYS,"Initiating %s draining.\n",
+			draining_is_peaceful ? "peaceful" : "graceful");
 		if( graceful_retirement > 0 ) {
 			dprintf(D_ALWAYS,
 					"Coordinating retirement of draining slots; retirement of all draining slots ends in %llds.\n",
@@ -3247,12 +3253,13 @@ ResMgr::startDraining(
 			// if empty or invalid, detach() returns NULL, which is what we want here if the expr is invalid
 			draining_start_expr = start.detach();
 		}
-		releaseAllClaimsReversibly("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
+		releaseAllClaimsForDraining("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
 	}
 	else if( how_fast <= DRAIN_QUICK ) {
 			// retirement time will not be honored, but vacate time will
 		dprintf(D_ALWAYS,"Initiating quick draining.\n");
 		draining_is_graceful = false;
+		draining_is_peaceful = false;
 		walk(&Resource::setBadputCausedByDraining);
 		releaseAllClaims("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
 	}
@@ -3260,6 +3267,7 @@ ResMgr::startDraining(
 			// neither retirement time nor vacate time will be honored
 		dprintf(D_ALWAYS,"Initiating fast draining.\n");
 		draining_is_graceful = false;
+		draining_is_peaceful = false;
 		walk(&Resource::setBadputCausedByDraining);
 		killAllClaims("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
 	}
@@ -3284,6 +3292,7 @@ ResMgr::cancelDraining(std::string request_id,bool reconfig,std::string &error_m
 	}
 
 	draining = false;
+	draining_is_peaceful = false;
 	drain_reason.clear();
 	// If we want to record when a non-resuming drain actually finished, we
 	// should only call this here if we've started draining since the last
@@ -3352,6 +3361,10 @@ ResMgr::drainingIsComplete(const Resource * /*rip*/) const
 	}
 
 	for (Resource * rip : slots) {
+		// A slot held by an OCU claim satisfies the drain.  The capacity has
+		// left the general pool, which is what was asked for, and waiting for
+		// the claim to go away would mean waiting forever.
+		if (rip->holdsOCUClaim()) { continue; }
 		if (rip->state() != drained_state) { return false; }
 	}
 	return true;
@@ -3398,6 +3411,7 @@ ResMgr::publish_draining_attrs(Resource *rip, ClassAd *cap)
 	if( isSlotDraining(rip) ) {
 		cap->Assign( ATTR_DRAINING, true );
 		cap->Assign(ATTR_DRAIN_REASON, this->drain_reason);
+		cap->Assign( ATTR_DRAINING_PEACEFUL, draining_is_peaceful );
 
 		std::string request_id;
 		if (draining) { formatstr(request_id, "%d", draining_id); }
@@ -3407,6 +3421,7 @@ ResMgr::publish_draining_attrs(Resource *rip, ClassAd *cap)
 		// in case we are writing into resource->r_classad, do a deep delete
 		caDeleteThruParent(cap, ATTR_DRAINING);
 		caDeleteThruParent(cap, ATTR_DRAIN_REASON);
+		caDeleteThruParent(cap, ATTR_DRAINING_PEACEFUL);
 		caDeleteThruParent(cap, ATTR_DRAINING_REQUEST_ID );
 	}
 
@@ -3540,7 +3555,7 @@ ResMgr::checkForDrainCompletion() {
 	this->max_job_retirement_time_override = 0;
 	walk( & Resource::refresh_draining_attrs );
 	// Initiate final draining.
-	releaseAllClaimsReversibly("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
+	releaseAllClaimsForDraining("Startd was draining", CONDOR_HOLD_CODE::StartdDraining, 0);
 }
 
 bool

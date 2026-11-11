@@ -744,6 +744,9 @@ std::array<std::pair<int, const char *>, 212> makeCommandTable() {
 static_assert(makeCommandTable().back().first == COMMAND_LAST, "Is the size of the std::array correct?");
 
 		// values used for "HowFast" in the draining request
+		// note that a startd that predates DRAIN_PEACEFUL drains gracefully when
+		// it is asked for it, because the graceful test is how_fast <= DRAIN_GRACEFUL
+#define DRAIN_PEACEFUL -10 // jobs are never killed; retirement time is unlimited
 #define DRAIN_GRACEFUL 0  // retirement time and vacate time are honored
 #define DRAIN_QUICK 10	  // retirement time will not be honored, but vacate time will
 #define DRAIN_FAST 20	  // neither retirement time nor vacate time will be honored

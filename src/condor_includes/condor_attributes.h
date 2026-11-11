@@ -409,6 +409,12 @@
 #define ATTR_OCU_ID  "OCUId"
 #define ATTR_OCU_NAME  "OCUName"
 #define ATTR_OCU_WANTED  "OCUWanted"
+// A job sets this to volunteer to run on somebody else's idle OCU claim.
+#define ATTR_OCU_WILLING  "OCUWilling"
+// Set on an OCU request to say which other users' jobs may borrow the claim
+// while it is idle.  Evaluated by the schedd against the same SLOT/OWNER/JOB
+// scopes as START_VANILLA_UNIVERSE.  Absent, it is OCU_BORROWER_START_DEFAULT.
+#define ATTR_OCU_BORROWER_START  "OCUBorrowerStart"
 #define ATTR_OCU_STATE  "OCUState"
 #define ATTR_IS_BUNDLE_REQUEST  "IsBundleRequest" // marks a resource request as a slot-bundle request
 // Job attr ("+IsBundle = true"): this job's cluster is a slot bundle.  Also the
@@ -1347,6 +1353,7 @@ extern const char ATTR_SEC_AUTHENTICATED_USER [];
 #define ATTR_RESUME_ON_COMPLETION  "ResumeOnCompletion"
 #define ATTR_RUN_INSTANCE_ID "RunInstanceID"
 #define ATTR_DRAINING  "Draining"
+#define ATTR_DRAINING_PEACEFUL  "DrainingPeaceful"
 #define ATTR_DRAINING_REQUEST_ID  "DrainingRequestId"
 #define ATTR_DRAINING_DEADLINE "DrainingDeadline"
 #define ATTR_EXPECTED_MACHINE_GRACEFUL_DRAINING_COMPLETION  "ExpectedMachineGracefulDrainingCompletion"

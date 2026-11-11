@@ -10401,6 +10401,16 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 				// not be for older ones.  Force to true just to be sure.
 				slot->my_match_ad->Assign(ATTR_OCU, true);
 
+				// Carry the OCU's borrower expression, if it set one, so that
+				// FindRunnableJob can ask whose jobs may use this claim while
+				// it is idle.  m_added_attrs is reapplied whenever the match ad
+				// is refreshed from a new slot ad, so it survives that.
+				ExprTree * borrow = ocu->ad.Lookup(ATTR_OCU_BORROWER_START);
+				if (borrow) {
+					slot->m_added_attrs.Insert(ATTR_OCU_BORROWER_START, borrow->Copy());
+					slot->my_match_ad->Update(slot->m_added_attrs);
+				}
+
 				// If we already have a match for this OCU, then delete this match
 				if (ocu->mrec) {
 					dprintf(D_ALWAYS, "OCU %d already has a match record (%s), ignoring new match record %s\n", ocu->ocu_id, ocu->mrec->description(), slot->description());

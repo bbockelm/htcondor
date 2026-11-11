@@ -10162,6 +10162,27 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad, const char * user, c
 	std::string remoteProject;
 	my_match_ad->LookupString(ATTR_REMOTE_PROJECT, remoteProject);
 
+	// Which other users' jobs the OCU's owner is willing to let borrow the
+	// claim while it sits idle.  The OCU carries it; absent, the site default
+	// applies, which out of the box is the volunteer flag jobs already set.
+	ConstraintHolder ocu_borrower_start;
+	if (is_ocu) {
+		ExprTree * expr = my_match_ad->Lookup(ATTR_OCU_BORROWER_START);
+		if (expr) {
+			ocu_borrower_start.set(expr->Copy());
+		} else {
+			auto_free_ptr dflt(param("OCU_BORROWER_START_DEFAULT"));
+			ocu_borrower_start.parse(dflt ? dflt.ptr() : "JOB." ATTR_OCU_WILLING " =?= true");
+		}
+		if ( ! ocu_borrower_start.Expr()) {
+			// An expression that does not parse must not silently admit
+			// everyone, nor silently admit no one without saying so.
+			dprintf(D_ERROR, "OCU borrower expression is not valid, so no job "
+				"may borrow this claim: %s\n", ocu_borrower_start.c_str());
+			ocu_borrower_start.parse("false");
+		}
+	}
+
 #ifdef USE_VANILLA_START
 	std::string job_attr("JOB");
 	bool eval_for_each_job = false;
@@ -10250,11 +10271,16 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad, const char * user, c
 						continue;
 					}
 				} else {
-					// Someone else's OCU claim
-					// only allow a job that is willing
-					bool OCUWilling = false;
-					job->LookupBool("OCUWilling", OCUWilling);
-					if ( ! OCUWilling) {
+					// Someone else's OCU claim.  The OCU says who may borrow it
+					// while it is idle; by default, whoever volunteered with
+					// OCUWilling.  The expression is the OCU owner's, so it can
+					// only narrow the field -- a borrower still has to satisfy
+					// everything else below before it runs here.
+					vad.Insert(job_attr, job);
+					bool may_borrow = vad.EvalAsBool(ocu_borrower_start.Expr(), false);
+					std::ignore = vad.Remove(job_attr);
+
+					if ( ! may_borrow) {
 						continue;
 					}
 				}

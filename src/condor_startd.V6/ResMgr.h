@@ -466,6 +466,11 @@ public:
 	void compute_draining_attrs();
 	const ExprTree * get_draining_expr() { return draining_start_expr; }
 
+		// True while a peaceful drain is in progress.  A peaceful drain gives
+		// every retiring claim unlimited retirement time, so no job is ever
+		// killed to satisfy it.
+	bool isDrainingPeacefully() const { return draining && draining_is_peaceful; }
+
 		// badput is in seconds
 	void addToDrainingBadput(time_t badput);
 
@@ -519,6 +524,14 @@ public:
 	}
 	void releaseAllClaimsReversibly(const std::string& reason, int code, int subcode) {
 		walk( [&](Resource* rip) { rip->shutdownAllClaims(true, true, reason, code, subcode); } );
+	}
+		// As releaseAllClaimsReversibly, but a slot held by an OCU claim keeps
+		// it.  Only draining uses this; a shutdown still takes everything.
+	void releaseAllClaimsForDraining(const std::string& reason, int code, int subcode) {
+		walk( [&](Resource* rip) {
+			if (rip->holdsOCUClaim()) { return; }
+			rip->shutdownAllClaims(true, true, reason, code, subcode);
+		} );
 	}
 	void killAllClaims(const std::string& reason, int code, int subcode) {
 		walk( [&](Resource* rip) { rip->shutdownAllClaims(false, false, reason, code, subcode); } );
@@ -650,6 +663,7 @@ private:
 	ExprTree * draining_start_expr{nullptr}; // formerly globalDrainingStartExpr
 	bool draining;
 	bool draining_is_graceful;
+	bool draining_is_peaceful;
 	unsigned char on_completion_of_draining;
 	int draining_id;
 	time_t drain_deadline;

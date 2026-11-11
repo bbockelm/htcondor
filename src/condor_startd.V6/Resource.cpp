@@ -524,6 +524,11 @@ Resource::retire_claim(bool reversible, const std::string& reason, int code, int
 				// regardless of MaxJobRetirementTime configuration.
 				r_cur->setRetirePeacefully(true);
 			}
+			if(resmgr->isDrainingPeacefully()) {
+				// Same bargain for a peaceful drain: the admin wants the slot
+				// back, but not at the cost of killing the job on it.
+				r_cur->setRetirePeacefully(true);
+			}
 		}
 		setVacateReason(reason, code, subcode);
 		change_state( retiring_act );

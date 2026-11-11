@@ -227,6 +227,10 @@ parseArgv( int argc, const char* argv[] )
 		else if (is_dash_arg_prefix(argv[i], "graceful", 1)) {
 			how_fast = DRAIN_GRACEFUL;
 		}
+			// -pool already takes "-p", so peaceful needs two characters
+		else if (is_dash_arg_prefix(argv[i], "peaceful", 2)) {
+			how_fast = DRAIN_PEACEFUL;
+		}
 		else if (is_dash_arg_prefix(argv[i], "resume-on-completion", 1)) {
 			if (on_completion) conflict(argv[i], on_completion);
 			on_completion = DRAIN_RESUME_ON_COMPLETION;
@@ -308,6 +312,7 @@ usage( const char *str )
 	fprintf( stderr, "\nOPTIONS:\n" );
 	fprintf( stderr, "-cancel           Stop draining.\n" );
 	fprintf( stderr, "-debug            Display debugging info to console\n" );
+	fprintf( stderr, "-peaceful         Never kill a job: wait indefinitely for each to finish.\n" );
 	fprintf( stderr, "-graceful         (the default) Honor MaxVacateTime and MaxJobRetirementTime.\n" );
 	fprintf( stderr, "-quick            Honor MaxVacateTime but not MaxJobRetirementTime.\n" );
 	fprintf( stderr, "-fast             Honor neither MaxVacateTime nor MaxJobRetirementTime.\n" );

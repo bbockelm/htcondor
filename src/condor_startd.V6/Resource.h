@@ -507,6 +507,12 @@ public:
 	bool is_broken_slot() const { return m_resource_feature == BROKEN_SLOT; }
 	bool can_create_dslot() const { return is_partitionable_slot() || (is_dynamic_slot() && !r_claims.empty()); }
 
+		// True when this slot is held by an OCU claim.  Draining leaves such a
+		// slot alone and counts it as drained: an OCU exists to hold capacity
+		// for its owner, so releasing it would hand the slot back to the pool,
+		// which is what the drain was trying to avoid.
+	bool holdsOCUClaim() const { return r_cur && r_cur->isOCU(); }
+
 	void set_parent(Resource* rip);
 	Resource* get_parent() { return m_parent; }
 	void clear_parent(); // disconnect from parent (called on deletion of dynamic slots)
