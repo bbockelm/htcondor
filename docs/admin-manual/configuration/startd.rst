@@ -38,6 +38,22 @@ section.
     jobs from matching.  To allow evictable jobs to match while draining,
     set this to an expression that matches only those jobs.
 
+:macro-def:`DRAIN_FINAL_START_EXPR`
+    An alternate :macro:`START` expression to use once a draining machine has
+    finished draining.  At that point the drain's own ``-start`` expression is
+    discarded and ``Requirements`` becomes ``false``, so the drained machine
+    accepts nothing; this names something for it to accept instead.  The case
+    this exists for is handing the freed capacity to a reservation rather than
+    back to the pool::
+
+        DRAIN_FINAL_START_EXPR = IsOCUHolder =?= true
+
+    Accepting an OCU here cannot prevent the drain from completing, because a
+    slot held by an OCU claim already counts as drained.  The schedd must also
+    be willing to match OCUs to draining slots; see
+    :macro:`OCU_MATCH_DRAINING_SLOTS`.  When this is not set, behavior is
+    unchanged.
+
 :macro-def:`SUSPEND`
     A boolean expression that, when ``True``, causes HTCondor to suspend
     running an HTCondor job. The machine may still be claimed, but the

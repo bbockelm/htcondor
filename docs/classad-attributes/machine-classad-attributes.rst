@@ -160,6 +160,11 @@ Machine ClassAd Attributes
     This attribute is ``True`` when the slot is draining and undefined
     if not.
 
+:classad-attribute-def:`DrainingPeaceful`
+    This attribute is ``True`` when the slot is draining and no job will be
+    evicted to satisfy that drain, as requested by ``condor_drain -peaceful``.
+    It is undefined when the slot is not draining.
+
 :classad-attribute-def:`DrainingRequestId`
     This attribute contains a string that is the request id of the
     draining request that put this slot in a draining state. It is

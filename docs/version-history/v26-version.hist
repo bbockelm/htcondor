@@ -1,5 +1,28 @@
 *** 26.2.0 features
 
+- :tool:`condor_drain` has a new **-peaceful** option, which drains a machine
+  without ever evicting a job: every retiring claim is given unlimited
+  retirement time, so the machine drains only as its jobs finish. A slot
+  draining this way advertises :ad-attr:`DrainingPeaceful`.
+  :jira:`XXXX`
+
+- A drain no longer takes back a slot held by an OCU claim, and counts such a
+  slot as drained, so the drain still completes and its on-completion action
+  still fires.
+  :jira:`XXXX`
+
+- An OCU may now claim a machine that is already draining, so that a
+  reservation can take the capacity a drain frees rather than losing it back
+  to the pool. This is off by default; see :macro:`OCU_MATCH_DRAINING_SLOTS`
+  and :macro:`DRAIN_FINAL_START_EXPR`.
+  :jira:`XXXX`
+
+- An OCU may say which other users' jobs are allowed to borrow it while it is
+  idle, by setting ``OCUBorrowerStart`` on the OCU request, or pool-wide with
+  :macro:`OCU_BORROWER_START_DEFAULT`. Absent both, any job setting
+  ``OCUWilling`` may borrow, as before.
+  :jira:`XXXX`
+
 - Administrators can now cap the DAGMan throttles that users may set via
   new configuration options such as :macro:`DAGMAN_MAX_JOBS_IDLE_CEILING`
   and :macro:`DAGMAN_USER_LOG_SCAN_INTERVAL_FLOOR`. These options may only

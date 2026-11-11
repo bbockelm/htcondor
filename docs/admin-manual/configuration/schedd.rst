@@ -1617,3 +1617,26 @@ These macros control the *condor_schedd*.
     we want to give other jobs using the same common file(s) a chance to
     run elsewhere.
 
+
+:macro-def:`OCU_MATCH_DRAINING_SLOTS`
+    A boolean that controls whether an OCU may claim a slot on a draining
+    execute machine.  When ``False``, the default, the *condor_schedd* adds
+    ``Draining =!= true`` to every OCU resource request, so an OCU never
+    matches a draining slot however that slot's policy is written.
+
+    When ``True``, a draining slot admits an OCU on the same terms as any
+    other work: by its own :macro:`START` expression.  A machine draining
+    without one has ``Requirements`` of ``false`` and still matches nothing,
+    so setting this alone changes nothing; it opens only the door an
+    administrator has deliberately held open with ``condor_drain -start`` or
+    :macro:`DRAIN_FINAL_START_EXPR`.
+
+:macro-def:`OCU_BORROWER_START_DEFAULT`
+    An expression deciding which other users' jobs may borrow an idle OCU
+    claim, used for any OCU that does not carry its own
+    ``OCUBorrowerStart``.  It is evaluated against the same ``SLOT``,
+    ``OWNER`` and ``JOB`` scopes as :macro:`START_VANILLA_UNIVERSE`.
+
+    When neither this nor the OCU's own expression is set, the rule is
+    ``JOB.OCUWilling =?= true``: any job that volunteers may borrow, which is
+    how OCUs behaved before either expression existed.

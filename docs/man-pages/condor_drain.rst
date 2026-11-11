@@ -10,7 +10,7 @@ Synopsis
 **condor_drain** [**-help** ]
 
 **condor_drain** [**-debug** ] [**-pool** *pool-name*]
-[**-graceful | -quick | -fast**] [**-reason** *reason-text*]
+[**-peaceful | -graceful | -quick | -fast**] [**-reason** *reason-text*]
 [**-resume-on-completion | -restart-on-completion | -reconfig-on-completion | -exit-on-completion**]
 [**-check** *expr*] [**-start** *expr*] *machine-name*
 
@@ -30,6 +30,11 @@ specifies otherwise. Which machine to drain is specified by the argument
 How currently running jobs are treated depends on the draining schedule
 that is chosen with a command-line option:
 
+ **-peaceful**
+    Wait indefinitely for jobs to finish on their own. No job is evicted
+    to satisfy the drain, whatever ``MaxJobRetirementTime`` says, so the
+    machine drains only as fast as its jobs complete. A slot draining
+    this way advertises :ad-attr:`DrainingPeaceful` as ``True``.
  **-graceful**
     Initiate a graceful eviction of the job. This means all promises
     that have been made to the job are honored, including
@@ -83,6 +88,8 @@ Options
  **-pool** *pool-name*
     Specify an alternate HTCondor pool, if the default one is not
     desired.
+ **-peaceful**
+    Drain without ever evicting a job.
  **-graceful**
     (the default) Honor the maximum vacate and retirement time policy.
  **-quick**
