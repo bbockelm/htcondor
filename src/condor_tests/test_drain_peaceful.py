@@ -38,8 +38,8 @@ def slots(condor, constraint="true"):
         htcondor.DaemonTypes.Startd,
         htcondor.AdTypes.Startd,
         constraint=constraint,
-        projection=["Name", "Machine", "State", "Activity", "Draining",
-                    "DrainingPeaceful", "MaxJobRetirementTime"],
+        projection=["Name", "Machine", "MyAddress", "State", "Activity",
+                    "Draining", "DrainingPeaceful", "MaxJobRetirementTime"],
     )
 
 
@@ -101,7 +101,10 @@ def running_job(condor, test_dir, path_to_sleep, drain_mode):
 @action
 def drained(condor, running_job, drain_mode):
     """Ask the startd to drain, then watch what happens to the job."""
-    machine = slots(condor)[0]["Machine"]
+    # Address the startd by its sinful rather than by hostname: a personal
+    # pool's FULL_HOSTNAME can be "localhost", which daemon location cannot
+    # resolve, and that has nothing to do with what is under test here.
+    machine = slots(condor)[0]["MyAddress"]
 
     result = condor.run_command(["condor_drain", drain_mode, machine], echo=True)
     assert result.returncode == 0, "condor_drain {} failed: {}".format(
