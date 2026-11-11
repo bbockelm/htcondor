@@ -421,7 +421,13 @@ command_request_claim(int cmd, Stream* stream )
 		return FALSE;
 	}
 
-	if (rip->isDraining() && resmgr->gracefulDrainingTimeRemaining(rip) < 20) {
+	// This guard exists so that a claim arriving as the drain finishes is not
+	// taken only to be killed moments later.  A drain that names a START
+	// expression is saying the opposite -- admit whatever matches, including
+	// once the machine is drained, which is what DRAIN_FINAL_START_EXPR is
+	// for -- so the guard does not apply to it.
+	if (rip->isDraining() && ! rip->getDrainingExpr() &&
+		resmgr->gracefulDrainingTimeRemaining(rip) < 20) {
 		rip->dprintf( D_ALWAYS, "Got %s near end of draining, ignoring.\n",
 			getCommandString(REQUEST_CLAIM) );
 		reply(stream, NOT_OK);
@@ -1446,6 +1452,17 @@ request_claim( Resource* rip, Claim *claim, const char* id, Stream* stream )
 	claim->setjobad( req_classad ); req_classad = nullptr; // give request ad (aka jobad) to the claim
 	claim->setrank( rank );
 	claim->setoldrank( oldrank );
+
+	{
+		// Mark an OCU claim as soon as we have the request ad, not after the
+		// claiming protocol finishes.  On a draining machine the slot is in
+		// retirement from the moment it exists, and an idle claim's retirement
+		// is over as soon as it begins, so a claim not yet known to be an OCU
+		// is reverted to Owner/Idle before it can be completed.
+		bool ocu_holder = false;
+		claim->ad()->LookupBool(ATTR_OCU_HOLDER, ocu_holder);
+		claim->setOCU(ocu_holder);
+	}
 
 	claim->client()->c_scheddName = schedd_name;
 

@@ -3547,9 +3547,29 @@ ResMgr::checkForDrainCompletion() {
 	if(! allAcceptedWhileDraining) { return; }
 
 	dprintf( D_ALWAYS, "Initiating final draining (all original jobs complete).\n" );
-	// This (auto-reversibly) sets START to false when we release all claims.
+	// This (auto-reversibly) sets START to false when we release all claims,
+	// so that the drained machine stops accepting work and the drain can
+	// finish.  DRAIN_FINAL_START_EXPR names something to admit instead of
+	// nothing.  An OCU is the case this exists for --
+	//     DRAIN_FINAL_START_EXPR = IsOCUHolder =?= true
+	// lets a reservation take the capacity the drain just freed, before the
+	// pool takes it back.  That cannot stop the drain from completing,
+	// because a slot an OCU holds already counts as drained.
 	delete draining_start_expr;
 	draining_start_expr = nullptr;
+	{
+		ConstraintHolder final_start(param("DRAIN_FINAL_START_EXPR"));
+		if ( ! final_start.empty() && ! final_start.Expr()) {
+			dprintf(D_ALWAYS, "Warning: DRAIN_FINAL_START_EXPR is not valid, "
+				"admitting nothing during final draining : %s\n",
+				final_start.c_str());
+		} else if ( ! final_start.empty()) {
+			dprintf(D_ALWAYS, "Final draining will admit %s\n", final_start.c_str());
+			// detach() yields NULL for an invalid expression, which is what we
+			// want: admit nothing rather than admit everything.
+			draining_start_expr = final_start.detach();
+		}
+	}
 	// Invalidate all claim IDs.  This prevents the schedd from claiming
 	// resources that were negotiated before draining finished.
 	walk( &Resource::invalidateAllClaimIDs );

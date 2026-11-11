@@ -186,13 +186,31 @@ ScheddNegotiate::nextJob()
 						// negotiator has to see clusterid and procid or it will not be happy.  Sad but true.
 						m_current_job_ad.Assign(ATTR_CLUSTER_ID, m_current_job_id.cluster);
 						m_current_job_ad.Assign(ATTR_PROC_ID, OCU_qkey2);
-						// Don't match OCU claims to draining slots
+						// Don't match OCU claims to draining slots, unless the
+						// pool says otherwise.  Where it does, a draining slot
+						// admits an OCU on the same terms as anything else: by
+						// its own START expression.  A slot draining without
+						// one has Requirements of false and still matches
+						// nothing, so this only opens a door an admin has
+						// deliberately held open --
+						//     condor_drain -start 'IsOCUHolder =?= true'
+						// and, once the machine is fully drained, the startd's
+						// DRAIN_FINAL_START_EXPR.
 						ExprTree *existing_req = m_current_job_ad.LookupExpr(ATTR_REQUIREMENTS);
-						if (existing_req) {
-							std::string req = std::string("(") + ExprTreeToString(existing_req) + ") && (Draining =!= true)";
-							m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, req.c_str());
-						} else {
-							m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, "Draining =!= true");
+						if ( ! param_boolean("OCU_MATCH_DRAINING_SLOTS", false)) {
+							if (existing_req) {
+								std::string req = std::string("(") + ExprTreeToString(existing_req) + ") && (Draining =!= true)";
+								m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, req.c_str());
+							} else {
+								m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, "Draining =!= true");
+							}
+						} else if ( ! existing_req) {
+							// An OCU request carries no Requirements of its
+							// own, and the negotiator discards an ad that has
+							// none ("No requirements found in ad to be
+							// optimized"), so say what is now meant: take
+							// whatever a slot is willing to admit.
+							m_current_job_ad.AssignExpr(ATTR_REQUIREMENTS, "true");
 						}
 						return true;
 					}
