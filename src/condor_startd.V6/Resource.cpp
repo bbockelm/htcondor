@@ -2168,7 +2168,13 @@ Resource::hasPreemptingClaim() const
 bool
 Resource::mayUnretire() const
 {
-	if(!isDraining() && r_cur && r_cur->mayUnretire()) {
+	// Draining does not put an OCU claim into retirement.  The slot is held
+	// for the OCU's owner and the drain counts it as drained rather than
+	// taking it back, so without this an idle OCU claim is retired the moment
+	// draining starts -- idle claims need no retirement time, so retirement
+	// is over as soon as it begins.
+	bool draining_me = isDraining() && ! holdsOCUClaim();
+	if(!draining_me && r_cur && r_cur->mayUnretire()) {
 		if(!hasPreemptingClaim()) {
 			// preempting claim has gone away
 			return true;

@@ -3378,6 +3378,9 @@ ResMgr::considerResumingAfterDraining()
 	}
 
 	for (Resource * rip : slots) {
+		// As in drainingIsComplete(): a slot held by an OCU claim satisfies
+		// the drain, so it must not hold up the on-completion action either.
+		if (rip->holdsOCUClaim()) { continue; }
 		if (rip->state() != drained_state || rip->activity() != idle_act) { return false; }
 	}
 

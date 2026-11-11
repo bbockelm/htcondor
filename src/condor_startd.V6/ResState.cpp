@@ -409,8 +409,13 @@ ResState::eval_policy(State & _state, Activity & _act, const Resource * rip, std
 			return xa_end_of_worklife;
 		}
 		if( (_act == idle_act) && rip->isDraining() &&
+			! rip->holdsOCUClaim() &&
 			! rip->r_cur->waitingForActivation() ) {
 			// TLM: STATE TRANSITION #10
+			// An idle OCU claim is exempt: it is held for its owner, and the
+			// drain counts the slot it holds as drained rather than taking it
+			// back.  Being idle is the normal condition of an OCU claim, not a
+			// sign that it is finished with the slot.
 			reason = "idle claim shutting down due to draining of this slot";
 			_state = preempting_state;
 			return xa_idle_drain;
