@@ -85,11 +85,21 @@ OCU_ONLY = "IsOCUHolder =?= true"
         # -start governs while the drain is running; DRAIN_FINAL_START_EXPR
         # governs once the machine is drained, which is when a reservation
         # actually wants the capacity.
-        "admits_ocus": {"id": "admits", "start": OCU_ONLY, "final": OCU_ONLY},
+        # Retirement of 0 means the drain reaches its final phase at once, so
+        # these exercise a machine that is already fully drained.
+        "admits_ocus": {"id": "admits", "start": OCU_ONLY, "final": OCU_ONLY,
+                        "retirement": "0", "expect": True},
         # A control: if an OCU cannot claim a drained EP even when it admits
         # everything, the problem is not the expression.
-        "admits_anything": {"id": "anything", "start": "true", "final": "true"},
-        "closed": {"id": "closed", "start": None, "final": None},
+        "admits_anything": {"id": "anything", "start": "true", "final": "true",
+                            "retirement": "0", "expect": True},
+        "closed": {"id": "closed", "start": None, "final": None,
+                   "retirement": "0", "expect": False},
+        # The realistic case: a long retirement time keeps the drain in
+        # progress, so the drain's own -start expression is still in force and
+        # slots are claimable as they free.  No DRAIN_FINAL_START_EXPR.
+        "mid_drain": {"id": "middrain", "start": OCU_ONLY, "final": None,
+                      "retirement": "3600", "expect": True},
     }
 )
 def drain_case(request):
@@ -101,6 +111,7 @@ def condor(test_dir, drain_case):
     extra = {}
     if drain_case["final"]:
         extra["DRAIN_FINAL_START_EXPR"] = drain_case["final"]
+    if drain_case["start"]:
         # The schedd stamps "Draining =!= true" onto every OCU request unless
         # the pool says otherwise, so without this no OCU can match a draining
         # slot no matter what the slot is willing to admit.
@@ -111,7 +122,7 @@ def condor(test_dir, drain_case):
             "NUM_CPUS": "2",
             "MEMORY": "4096",
             "DISK": "4096000",
-            "MAXJOBRETIREMENTTIME": "0",
+            "MAXJOBRETIREMENTTIME": drain_case["retirement"],
             "NEGOTIATOR_CYCLE_DELAY": "2",
             "NEGOTIATOR_INTERVAL": "2",
             "OCU_SUPER_USERS": getpass.getuser(),
@@ -200,7 +211,7 @@ class TestOCUClaimsDrainingEP:
     ):
         """A drain that admits OCUs gets one; a drain that admits nothing --
         the default, where Requirements becomes false -- does not."""
-        if drain_case["final"]:
+        if drain_case["expect"]:
             assert ocu_on_draining_ep["claim"] is not None, (
                 "the EP was draining with DRAIN_FINAL_START_EXPR = {!r}, "
                 "which an OCU request satisfies, but no OCU claim was made "
